@@ -3,7 +3,7 @@
   "displayName": "AnyCSV",
   "icon": "assets/CSV-icon-256.png",
   "description": "Work with delimited text: detect separators, preview tables, filter columns, and lint row shape.",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "SanyamKumar",
   "repository": {
     "type": "git",

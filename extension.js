@@ -388,10 +388,11 @@ function findCell(document, parsed, position) {
     const middle = (low + high) >> 1;
     const row = parsed.rows[middle];
     if (offset < row.start) high = middle - 1;
-    else if (offset > row.end) low = middle + 1;
+    else if (offset >= row.end) low = middle + 1;
     else {
-      const cell = row.cells.find(item => offset >= item.start && offset <= item.end);
-      return cell ? { cell, row, rowIndex: middle, columnIndex: row.cells.indexOf(cell) } : undefined;
+      const columnIndex = row.cells.findIndex(item => offset >= item.start && offset < item.end);
+      const cell = row.cells[columnIndex];
+      return cell ? { cell, row, rowIndex: middle, columnIndex } : undefined;
     }
   }
   return undefined;
