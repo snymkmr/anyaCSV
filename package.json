@@ -5,6 +5,10 @@
   "description": "Work with delimited text: detect separators, preview tables, filter columns, and lint row shape.",
   "version": "0.1.4",
   "publisher": "SanyamKumar",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/snymkmr/anyCSV.git"
+  },
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
