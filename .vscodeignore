@@ -1,0 +1,5 @@
+.gitignore
+*.vsix
+test/**
+assets/*.svg
+assets/anycsv-icon.png

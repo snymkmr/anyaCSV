@@ -1,0 +1,131 @@
+{
+  "name": "anycsv",
+  "displayName": "AnyCSV",
+  "icon": "assets/CSV-icon-256.png",
+  "description": "Work with delimited text: detect separators, preview tables, filter columns, and lint row shape.",
+  "version": "0.1.4",
+  "publisher": "SanyamKumar",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "csv",
+        "aliases": ["csv", "AnyCSV"],
+        "extensions": [".csv"]
+      },
+      {
+        "id": "tsv",
+        "aliases": ["tsv", "AnyCSV TSV"],
+        "extensions": [".tsv", ".tab"]
+      },
+      {
+        "id": "csv (semicolon)",
+        "aliases": ["csv (semicolon)"]
+      },
+      {
+        "id": "csv (whitespace)",
+        "aliases": ["csv (whitespace)"]
+      },
+      {
+        "id": "csv (pipe)",
+        "aliases": ["csv (pipe)"],
+        "extensions": [".psv"]
+      },
+      {
+        "id": "dynamic csv",
+        "aliases": ["dynamic csv"],
+        "extensions": [".ssv", ".dsv"]
+      }
+    ],
+    "commands": [
+      {
+        "command": "anycsv.enableForCurrentFile",
+        "title": "AnyCSV: Enable for Current File"
+      },
+      {
+        "command": "anycsv.setDelimiter",
+        "title": "AnyCSV: Set Delimiter"
+      },
+      {
+        "command": "anycsv.setDelimiterFromSelection",
+        "title": "AnyCSV: Set Separator from Selection"
+      },
+      {
+        "command": "anycsv.autoDetectDelimiter",
+        "title": "AnyCSV: Auto Detect Delimiter"
+      },
+      {
+        "command": "anycsv.showLint",
+        "title": "AnyCSV: Show Lint"
+      },
+      {
+        "command": "anycsv.previewTable",
+        "title": "AnyCSV: Preview as Table",
+        "icon": "$(table)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "anycsv.previewTable",
+          "when": "anycsv.isDelimited",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AnyCSV",
+      "properties": {
+        "anycsv.delimiter": {
+          "type": "string",
+          "default": "auto",
+          "description": "Field separator to use, or 'auto' to detect it. Use \\t to represent a tab or enter any literal separator."
+        },
+        "anycsv.quoteCharacter": {
+          "type": "string",
+          "default": "\"",
+          "description": "Character used to quote fields. Set to an empty string to disable quoting."
+        },
+        "anycsv.headerRow": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 0,
+          "description": "One-based row containing column names. Set to 0 when the file has no header."
+        },
+        "anycsv.ignoreEmptyLines": {
+          "type": "boolean",
+          "default": true,
+          "description": "Skip completely blank lines when checking row widths."
+        },
+        "anycsv.autoDetect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Detect delimited content in CSV, Plain Text, and .txt files."
+        },
+        "anycsv.autoDetectSampleRows": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 200,
+          "description": "Maximum number of logical records to inspect during separator autodetection."
+        },
+        "anycsv.autoDetectSeparators": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" },
+          "description": "Additional separator characters or strings to try during autodetection. Use a JSON tab escape (\\t) for a tab."
+        }
+      }
+    }
+  }
+}
