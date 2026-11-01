@@ -14,7 +14,28 @@ try {
   Module._load = originalLoad;
 }
 
-const { parseDelimited, detectDelimiter, findCell } = extension;
+const { parseDelimited, detectDelimiter, findCell, getFilteredTablePreviewRows } = extension;
+
+test('supports exact matching across global and column filters', () => {
+  const model = {
+    columnCount: 2,
+    dataRows: [
+      { row: { cells: [{ value: 'Maple Street' }, { value: 'Toronto' }] } },
+      { row: { cells: [{ value: 'Maple' }, { value: 'Toronto' }] } }
+    ]
+  };
+
+  assert.equal(getFilteredTablePreviewRows(model, { globalTerm: 'Maple' }).length, 2);
+  assert.equal(getFilteredTablePreviewRows(model, { globalTerm: 'Maple', exactMatch: true }).length, 1);
+  assert.equal(getFilteredTablePreviewRows(model, {
+    columnTerms: [{ index: 1, term: 'toronto' }],
+    exactMatch: true
+  }).length, 2);
+  assert.equal(getFilteredTablePreviewRows(model, {
+    columnTerms: [{ index: 0, term: 'Maple' }],
+    exactMatch: true
+  }).length, 1);
+});
 
 test('parses escaped quotes and multiline quoted fields', () => {
   const parsed = parseDelimited(
