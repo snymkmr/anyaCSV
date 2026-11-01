@@ -37,7 +37,7 @@ function printableDelimiter(delimiter) {
 function configuredDelimiter(document, context) {
   const override = context.workspaceState.get(`delimiter:${document.uri.toString()}`);
   if (typeof override === 'string') return override;
-  const configured = vscode.workspace.getConfiguration('anycsv', document.uri).get('delimiter', 'auto');
+  const configured = vscode.workspace.getConfiguration('anyacsv', document.uri).get('delimiter', 'auto');
   if (configured !== 'auto') return configured === '\\t' ? '\t' : configured;
   switch (document.languageId) {
     case 'tsv': return '\t';
@@ -52,7 +52,7 @@ function isCsvDocument(document, context) {
   if (context.enabledDocuments.has(document.uri.toString())) return true;
   if (LANGUAGE_IDS.has(document.languageId)) return true;
   if (document.uri.scheme === 'file' && FILE_EXTENSIONS.has(path.extname(document.uri.fsPath).toLowerCase())) return true;
-  const config = vscode.workspace.getConfiguration('anycsv', document.uri);
+  const config = vscode.workspace.getConfiguration('anyacsv', document.uri);
   if (configuredDelimiter(document, context) !== 'auto') return true;
   const isTextCandidate = document.languageId === 'plaintext'
     || (document.uri.scheme === 'file' && TEXT_EXTENSIONS.has(path.extname(document.uri.fsPath).toLowerCase()));
@@ -262,7 +262,7 @@ function detectDelimiter(text, quoteCharacter, maxRows, singleRowMinimumColumns,
 }
 
 function getParsed(document, context) {
-  const config = vscode.workspace.getConfiguration('anycsv', document.uri);
+  const config = vscode.workspace.getConfiguration('anyacsv', document.uri);
   const quoteCharacter = config.get('quoteCharacter', '"');
   const requested = configuredDelimiter(document, context);
   const autoDetect = config.get('autoDetect', true);
@@ -310,7 +310,7 @@ function getParsed(document, context) {
 }
 
 function lintDocument(document, parsed, context) {
-  const config = vscode.workspace.getConfiguration('anycsv', document.uri);
+  const config = vscode.workspace.getConfiguration('anyacsv', document.uri);
   const headerRow = config.get('headerRow', 1);
   const ignoreEmptyLines = config.get('ignoreEmptyLines', true);
   const diagnostics = parsed.errors.map(error => {
@@ -355,7 +355,7 @@ function refreshDocument(document, context) {
   const isDelimited = isCsvDocument(document, context);
   const activeEditor = vscode.window.activeTextEditor;
   if (activeEditor?.document.uri.toString() === document.uri.toString()) {
-    vscode.commands.executeCommand('setContext', 'anycsv.isDelimited', isDelimited);
+    vscode.commands.executeCommand('setContext', 'anyacsv.isDelimited', isDelimited);
   }
   if (!isDelimited) {
     context.diagnostics.delete(document.uri);
@@ -372,7 +372,7 @@ function refreshDocument(document, context) {
 }
 
 function getColumnName(document, parsed, rowIndex, columnIndex, context) {
-  const headerRowNumber = vscode.workspace.getConfiguration('anycsv', document.uri).get('headerRow', 1);
+  const headerRowNumber = vscode.workspace.getConfiguration('anyacsv', document.uri).get('headerRow', 1);
   const header = headerRowNumber > 0 ? parsed.rows[headerRowNumber - 1] : undefined;
   const source = header?.cells[columnIndex];
   if (source && (rowIndex !== headerRowNumber - 1 || source.value.trim())) return source.value.trim();
@@ -412,7 +412,7 @@ function updateStatus(context) {
     : `$(warning) CSV: ${diagnostics.length} issue${diagnostics.length === 1 ? '' : 's'}`;
   context.statusBar.text = summary;
   context.statusBar.tooltip = `${errors} error${errors === 1 ? '' : 's'}, ${warnings} warning${warnings === 1 ? '' : 's'} · delimiter: ${printableDelimiter(getParsed(editor.document, context).delimiter)} · Click to show lint`;
-  context.statusBar.command = 'anycsv.showLint';
+  context.statusBar.command = 'anyacsv.showLint';
   context.statusBar.show();
 }
 
@@ -473,7 +473,7 @@ const PREVIEW_PAGE_SIZE = 100;
 const PREVIEW_MAX_COLUMNS = 200;
 
 function getTablePreviewModel(document, parsed) {
-  const config = vscode.workspace.getConfiguration('anycsv', document.uri);
+  const config = vscode.workspace.getConfiguration('anyacsv', document.uri);
   const headerRowNumber = config.get('headerRow', 1);
   const ignoreEmptyLines = config.get('ignoreEmptyLines', true);
   const possibleHeaderIndex = Number.isInteger(headerRowNumber) && headerRowNumber > 0
@@ -693,7 +693,7 @@ function showTablePreview(context) {
   let panel = context.previewPanels.get(uri);
   if (!panel) {
     panel = vscode.window.createWebviewPanel(
-      'anycsv.tablePreview',
+      'anyacsv.tablePreview',
       'AnyaCSV Table Preview',
       vscode.ViewColumn.Active,
       { enableScripts: true, localResourceRoots: [] }
@@ -759,7 +759,7 @@ function observeLanguage(document, extensionContext, hostContext) {
 }
 
 function activate(context) {
-  const diagnostics = vscode.languages.createDiagnosticCollection('anycsv');
+  const diagnostics = vscode.languages.createDiagnosticCollection('anyacsv');
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20);
   const decorations = COLOR_IDS.map(color => vscode.window.createTextEditorDecorationType({
     color: new vscode.ThemeColor(color),
@@ -777,7 +777,7 @@ function activate(context) {
     lastLanguageByUri: new Map(),
     workspaceState: context.workspaceState
   };
-  statusBar.command = 'anycsv.showLint';
+  statusBar.command = 'anyacsv.showLint';
   context.subscriptions.push(diagnostics, statusBar, ...decorations);
 
   context.subscriptions.push(vscode.languages.registerHoverProvider({ scheme: '*' }, {
@@ -787,7 +787,7 @@ function activate(context) {
       const found = findCell(document, parsed, position);
       if (!found) return undefined;
       const name = getColumnName(document, parsed, found.rowIndex, found.columnIndex, extensionContext);
-      const headerRow = vscode.workspace.getConfiguration('anycsv', document.uri).get('headerRow', 1);
+      const headerRow = vscode.workspace.getConfiguration('anyacsv', document.uri).get('headerRow', 1);
       const rowLabel = found.rowIndex === headerRow - 1 ? 'Header' : `Row ${found.rowIndex + 1}`;
       const markdown = new vscode.MarkdownString();
       markdown.appendMarkdown(`**Column ${found.columnIndex + 1}**`);
@@ -804,7 +804,7 @@ function activate(context) {
     }
   }));
 
-  context.subscriptions.push(vscode.commands.registerCommand('anycsv.enableForCurrentFile', async () => {
+  context.subscriptions.push(vscode.commands.registerCommand('anyacsv.enableForCurrentFile', async () => {
     const document = vscode.window.activeTextEditor?.document;
     if (!document) return;
     extensionContext.enabledDocuments.add(document.uri.toString());
@@ -814,7 +814,7 @@ function activate(context) {
     vscode.window.showInformationMessage(`AnyaCSV enabled for ${path.basename(document.uri.fsPath) || document.uri.toString()}.`);
   }));
 
-  context.subscriptions.push(vscode.commands.registerCommand('anycsv.setDelimiter', async () => {
+  context.subscriptions.push(vscode.commands.registerCommand('anyacsv.setDelimiter', async () => {
     const document = vscode.window.activeTextEditor?.document;
     if (!document) return;
     const current = configuredDelimiter(document, extensionContext);
@@ -827,7 +827,7 @@ function activate(context) {
     await applyDocumentDelimiter(document, input, extensionContext, context);
   }));
 
-  context.subscriptions.push(vscode.commands.registerCommand('anycsv.setDelimiterFromSelection', async () => {
+  context.subscriptions.push(vscode.commands.registerCommand('anyacsv.setDelimiterFromSelection', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
     const delimiter = editor.document.getText(editor.selection);
@@ -838,7 +838,7 @@ function activate(context) {
     await applyDocumentDelimiter(editor.document, delimiter, extensionContext, context);
   }));
 
-  context.subscriptions.push(vscode.commands.registerCommand('anycsv.autoDetectDelimiter', async () => {
+  context.subscriptions.push(vscode.commands.registerCommand('anyacsv.autoDetectDelimiter', async () => {
     const document = vscode.window.activeTextEditor?.document;
     if (!document) return;
     extensionContext.enabledDocuments.add(document.uri.toString());
@@ -850,8 +850,8 @@ function activate(context) {
     updateDecorations(vscode.window.activeTextEditor, extensionContext);
   }));
 
-  context.subscriptions.push(vscode.commands.registerCommand('anycsv.showLint', () => showLint(extensionContext)));
-  context.subscriptions.push(vscode.commands.registerCommand('anycsv.previewTable', () => showTablePreview(extensionContext)));
+  context.subscriptions.push(vscode.commands.registerCommand('anyacsv.showLint', () => showLint(extensionContext)));
+  context.subscriptions.push(vscode.commands.registerCommand('anyacsv.previewTable', () => showTablePreview(extensionContext)));
   context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(document => {
     observeLanguage(document, extensionContext, context);
     refreshDocument(document, extensionContext);
@@ -875,7 +875,7 @@ function activate(context) {
     diagnostics.delete(document.uri);
   }));
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-    if (event.affectsConfiguration('anycsv')) {
+    if (event.affectsConfiguration('anyacsv')) {
       extensionContext.parseCache.clear();
       vscode.workspace.textDocuments.forEach(document => {
         refreshDocument(document, extensionContext);
@@ -890,7 +890,7 @@ function activate(context) {
       observeLanguage(editor.document, extensionContext, context);
       refreshDocument(editor.document, extensionContext);
     } else {
-      vscode.commands.executeCommand('setContext', 'anycsv.isDelimited', false);
+      vscode.commands.executeCommand('setContext', 'anyacsv.isDelimited', false);
     }
     updateDecorations(editor, extensionContext);
     updateStatus(extensionContext);

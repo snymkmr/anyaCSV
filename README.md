@@ -24,7 +24,7 @@ Choose a mode from VS Code's language selector in the bottom-right corner:
 | `csv (pipe)` | Pipe | `.psv` |
 | `dynamic csv` | Auto-detected or custom | `.ssv`, `.dsv` |
 
-With autodetection enabled, AnyaCSV recognizes delimited content in **Plain Text** and `.txt` files. Set `anycsv.autoDetect` to `false` to disable content detection, or adjust `anycsv.autoDetectSampleRows` (default `20`) to change how many logical records it inspects. Explicit language modes and custom delimiter settings continue to work when autodetection is off.
+With autodetection enabled, AnyaCSV recognizes delimited content in **Plain Text** and `.txt` files. Set `anyacsv.autoDetect` to `false` to disable content detection, or adjust `anyacsv.autoDetectSampleRows` (default `20`) to change how many logical records it inspects. Explicit language modes and custom delimiter settings continue to work when autodetection is off.
 
 You can assign an extension to a mode in VS Code settings. Use the lowercase language IDs shown here:
 
@@ -46,16 +46,16 @@ You can assign an extension to a mode in VS Code settings. Use the lowercase lan
 
 ## Settings
 
-- `anycsv.delimiter`: `auto` by default. Set a separator such as `;` or `\t`; a configured value overrides the selected language mode.
-- `anycsv.autoDetect`: detect content in CSV and Plain Text files, default `true`.
-- `anycsv.autoDetectSampleRows`: logical records to inspect during detection, default `20` (range `1`–`200`).
-- `anycsv.autoDetectSeparators`: extra separator strings to include in autodetection, for example `["::", "^"]`.
-- `anycsv.quoteCharacter`: quote character, default `"`.
-- `anycsv.headerRow`: one-based header row, default `1`; set `0` if there is no header.
-- `anycsv.ignoreEmptyLines`: skip blank lines in column-count linting, default `true`.
+- `anyacsv.delimiter`: `auto` by default. Set a separator such as `;` or `\t`; a configured value overrides the selected language mode.
+- `anyacsv.autoDetect`: detect content in CSV and Plain Text files, default `true`.
+- `anyacsv.autoDetectSampleRows`: logical records to inspect during detection, default `20` (range `1`–`200`).
+- `anyacsv.autoDetectSeparators`: extra separator strings to include in autodetection, for example `["::", "^"]`.
+- `anyacsv.quoteCharacter`: quote character, default `"`.
+- `anyacsv.headerRow`: one-based header row, default `1`; set `0` if there is no header.
+- `anyacsv.ignoreEmptyLines`: skip blank lines in column-count linting, default `true`.
 
 Example setting for separators such as `::` and `^`:
 
 ```json
-"anycsv.autoDetectSeparators": ["::", "^"]
+"anyacsv.autoDetectSeparators": ["::", "^"]
 ```

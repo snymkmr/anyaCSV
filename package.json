@@ -56,27 +56,27 @@
     ],
     "commands": [
       {
-        "command": "anycsv.enableForCurrentFile",
+        "command": "anyacsv.enableForCurrentFile",
         "title": "AnyaCSV: Enable for Current File"
       },
       {
-        "command": "anycsv.setDelimiter",
+        "command": "anyacsv.setDelimiter",
         "title": "AnyaCSV: Set Delimiter"
       },
       {
-        "command": "anycsv.setDelimiterFromSelection",
+        "command": "anyacsv.setDelimiterFromSelection",
         "title": "AnyaCSV: Set Separator from Selection"
       },
       {
-        "command": "anycsv.autoDetectDelimiter",
+        "command": "anyacsv.autoDetectDelimiter",
         "title": "AnyaCSV: Auto Detect Delimiter"
       },
       {
-        "command": "anycsv.showLint",
+        "command": "anyacsv.showLint",
         "title": "AnyaCSV: Show Lint"
       },
       {
-        "command": "anycsv.previewTable",
+        "command": "anyacsv.previewTable",
         "title": "AnyaCSV: Preview as Table",
         "icon": "$(table)"
       }
@@ -84,8 +84,8 @@
     "menus": {
       "editor/title": [
         {
-          "command": "anycsv.previewTable",
-          "when": "anycsv.isDelimited",
+          "command": "anyacsv.previewTable",
+          "when": "anyacsv.isDelimited",
           "group": "navigation"
         }
       ]
@@ -93,40 +93,40 @@
     "configuration": {
       "title": "AnyaCSV",
       "properties": {
-        "anycsv.delimiter": {
+        "anyacsv.delimiter": {
           "type": "string",
           "default": "auto",
           "description": "Field separator to use, or 'auto' to detect it. Use \\t to represent a tab or enter any literal separator."
         },
-        "anycsv.quoteCharacter": {
+        "anyacsv.quoteCharacter": {
           "type": "string",
           "default": "\"",
           "description": "Character used to quote fields. Set to an empty string to disable quoting."
         },
-        "anycsv.headerRow": {
+        "anyacsv.headerRow": {
           "type": "integer",
           "default": 1,
           "minimum": 0,
           "description": "One-based row containing column names. Set to 0 when the file has no header."
         },
-        "anycsv.ignoreEmptyLines": {
+        "anyacsv.ignoreEmptyLines": {
           "type": "boolean",
           "default": true,
           "description": "Skip completely blank lines when checking row widths."
         },
-        "anycsv.autoDetect": {
+        "anyacsv.autoDetect": {
           "type": "boolean",
           "default": true,
           "description": "Detect delimited content in CSV, Plain Text, and .txt files."
         },
-        "anycsv.autoDetectSampleRows": {
+        "anyacsv.autoDetectSampleRows": {
           "type": "integer",
           "default": 20,
           "minimum": 1,
           "maximum": 200,
           "description": "Maximum number of logical records to inspect during separator autodetection."
         },
-        "anycsv.autoDetectSeparators": {
+        "anyacsv.autoDetectSeparators": {
           "type": "array",
           "default": [],
           "items": { "type": "string" },
