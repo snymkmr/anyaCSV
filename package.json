@@ -1,13 +1,13 @@
 {
-  "name": "anycsv",
-  "displayName": "AnyCSV",
+  "name": "anyacsv",
+  "displayName": "AnyaCSV",
   "icon": "assets/CSV-icon-256.png",
-  "description": "Work with delimited text: detect separators, preview tables, filter columns, and lint row shape.",
-  "version": "0.1.5",
-  "publisher": "SanyamKumar",
+  "description": "Detect, preview, and lint CSV and other delimited files.",
+  "version": "0.1.6",
+  "publisher": "Sanyam",
   "repository": {
     "type": "git",
-    "url": "https://github.com/snymkmr/anyCSV.git"
+    "url": "https://github.com/snymkmr/anyaCSV.git"
   },
   "license": "MIT",
   "engines": {
@@ -27,12 +27,12 @@
     "languages": [
       {
         "id": "csv",
-        "aliases": ["csv", "AnyCSV"],
+        "aliases": ["csv", "AnyaCSV"],
         "extensions": [".csv"]
       },
       {
         "id": "tsv",
-        "aliases": ["tsv", "AnyCSV TSV"],
+        "aliases": ["tsv", "AnyaCSV TSV"],
         "extensions": [".tsv", ".tab"]
       },
       {
@@ -57,27 +57,27 @@
     "commands": [
       {
         "command": "anycsv.enableForCurrentFile",
-        "title": "AnyCSV: Enable for Current File"
+        "title": "AnyaCSV: Enable for Current File"
       },
       {
         "command": "anycsv.setDelimiter",
-        "title": "AnyCSV: Set Delimiter"
+        "title": "AnyaCSV: Set Delimiter"
       },
       {
         "command": "anycsv.setDelimiterFromSelection",
-        "title": "AnyCSV: Set Separator from Selection"
+        "title": "AnyaCSV: Set Separator from Selection"
       },
       {
         "command": "anycsv.autoDetectDelimiter",
-        "title": "AnyCSV: Auto Detect Delimiter"
+        "title": "AnyaCSV: Auto Detect Delimiter"
       },
       {
         "command": "anycsv.showLint",
-        "title": "AnyCSV: Show Lint"
+        "title": "AnyaCSV: Show Lint"
       },
       {
         "command": "anycsv.previewTable",
-        "title": "AnyCSV: Preview as Table",
+        "title": "AnyaCSV: Preview as Table",
         "icon": "$(table)"
       }
     ],
@@ -91,7 +91,7 @@
       ]
     },
     "configuration": {
-      "title": "AnyCSV",
+      "title": "AnyaCSV",
       "properties": {
         "anycsv.delimiter": {
           "type": "string",

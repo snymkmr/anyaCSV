@@ -319,7 +319,7 @@ function lintDocument(document, parsed, context) {
       error.message,
       vscode.DiagnosticSeverity.Error
     );
-    diagnostic.source = 'AnyCSV';
+    diagnostic.source = 'AnyaCSV';
     diagnostic.code = 'csv-quoting';
     return diagnostic;
   });
@@ -341,7 +341,7 @@ function lintDocument(document, parsed, context) {
         `Expected ${baseline} columns but found ${row.cells.length}.`,
         vscode.DiagnosticSeverity.Warning
       );
-      diagnostic.source = 'AnyCSV';
+      diagnostic.source = 'AnyaCSV';
       diagnostic.code = 'csv-column-count';
       diagnostics.push(diagnostic);
     }
@@ -444,7 +444,7 @@ async function showLint(context) {
   if (!editor || !isCsvDocument(editor.document, context)) return;
   const diagnostics = context.diagnostics.get(editor.document.uri) || [];
   if (diagnostics.length === 0) {
-    vscode.window.showInformationMessage('AnyCSV: no lint issues found.');
+    vscode.window.showInformationMessage('AnyaCSV: no lint issues found.');
     return;
   }
   const choices = diagnostics.map(diagnostic => ({
@@ -452,7 +452,7 @@ async function showLint(context) {
     description: diagnostic.severity === vscode.DiagnosticSeverity.Error ? 'Error' : 'Warning',
     diagnostic
   }));
-  const selected = await vscode.window.showQuickPick(choices, { placeHolder: 'AnyCSV lint issues' });
+  const selected = await vscode.window.showQuickPick(choices, { placeHolder: 'AnyaCSV lint issues' });
   if (selected) {
     editor.selection = new vscode.Selection(selected.diagnostic.range.start, selected.diagnostic.range.end);
     editor.revealRange(selected.diagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
@@ -685,7 +685,7 @@ function showTablePreview(context) {
   const document = vscode.window.activeTextEditor?.document;
   if (!document) return;
   if (!isCsvDocument(document, context)) {
-    vscode.window.showWarningMessage('AnyCSV could not identify this file as delimited data. Use “AnyCSV: Enable for Current File” first.');
+    vscode.window.showWarningMessage('AnyaCSV could not identify this file as delimited data. Use “AnyaCSV: Enable for Current File” first.');
     return;
   }
 
@@ -694,7 +694,7 @@ function showTablePreview(context) {
   if (!panel) {
     panel = vscode.window.createWebviewPanel(
       'anycsv.tablePreview',
-      'AnyCSV Table Preview',
+      'AnyaCSV Table Preview',
       vscode.ViewColumn.Active,
       { enableScripts: true, localResourceRoots: [] }
     );
@@ -708,7 +708,7 @@ function showTablePreview(context) {
       context.previewPanels.delete(uri);
     }));
   }
-  panel.title = `AnyCSV: ${path.basename(document.uri.fsPath) || 'CSV Table'}`;
+  panel.title = `AnyaCSV: ${path.basename(document.uri.fsPath) || 'CSV Table'}`;
   panel.webview.html = buildTablePreviewHtml(document, getParsed(document, context));
   panel.reveal(vscode.ViewColumn.Active);
 }
@@ -716,11 +716,11 @@ function showTablePreview(context) {
 async function applyDocumentDelimiter(document, delimiter, extensionContext, hostContext) {
   const normalized = delimiter === '\\t' ? '\t' : delimiter;
   if (!normalized) {
-    vscode.window.showErrorMessage('AnyCSV delimiter cannot be empty.');
+    vscode.window.showErrorMessage('AnyaCSV delimiter cannot be empty.');
     return false;
   }
   if (/[\r\n]/.test(normalized)) {
-    vscode.window.showErrorMessage('AnyCSV separators cannot contain line breaks.');
+    vscode.window.showErrorMessage('AnyaCSV separators cannot contain line breaks.');
     return false;
   }
   const uri = document.uri.toString();
@@ -811,7 +811,7 @@ function activate(context) {
     await context.globalState.update('enabledDocuments', [...extensionContext.enabledDocuments]);
     refreshDocument(document, extensionContext);
     updateDecorations(vscode.window.activeTextEditor, extensionContext);
-    vscode.window.showInformationMessage(`AnyCSV enabled for ${path.basename(document.uri.fsPath) || document.uri.toString()}.`);
+    vscode.window.showInformationMessage(`AnyaCSV enabled for ${path.basename(document.uri.fsPath) || document.uri.toString()}.`);
   }));
 
   context.subscriptions.push(vscode.commands.registerCommand('anycsv.setDelimiter', async () => {
