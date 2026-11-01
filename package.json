@@ -3,7 +3,7 @@
   "displayName": "AnyaCSV",
   "icon": "assets/CSV-icon-256.png",
   "description": "Detect, preview, and lint CSV and other delimited files.",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "publisher": "Sanyam",
   "repository": {
     "type": "git",
@@ -27,31 +27,55 @@
     "languages": [
       {
         "id": "csv",
-        "aliases": ["csv", "AnyaCSV"],
-        "extensions": [".csv"]
+        "aliases": [
+          "csv",
+          "AnyaCSV"
+        ],
+        "extensions": [
+          ".csv"
+        ]
       },
       {
         "id": "tsv",
-        "aliases": ["tsv", "AnyaCSV TSV"],
-        "extensions": [".tsv", ".tab"]
+        "aliases": [
+          "tsv",
+          "AnyaCSV TSV"
+        ],
+        "extensions": [
+          ".tsv",
+          ".tab"
+        ]
       },
       {
         "id": "csv (semicolon)",
-        "aliases": ["csv (semicolon)"]
+        "aliases": [
+          "csv (semicolon)"
+        ]
       },
       {
         "id": "csv (whitespace)",
-        "aliases": ["csv (whitespace)"]
+        "aliases": [
+          "csv (whitespace)"
+        ]
       },
       {
         "id": "csv (pipe)",
-        "aliases": ["csv (pipe)"],
-        "extensions": [".psv"]
+        "aliases": [
+          "csv (pipe)"
+        ],
+        "extensions": [
+          ".psv"
+        ]
       },
       {
         "id": "dynamic csv",
-        "aliases": ["dynamic csv"],
-        "extensions": [".ssv", ".dsv"]
+        "aliases": [
+          "dynamic csv"
+        ],
+        "extensions": [
+          ".ssv",
+          ".dsv"
+        ]
       }
     ],
     "commands": [
@@ -129,7 +153,9 @@
         "anyacsv.autoDetectSeparators": {
           "type": "array",
           "default": [],
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Additional separator characters or strings to try during autodetection. Use a JSON tab escape (\\t) for a tab."
         }
       }
