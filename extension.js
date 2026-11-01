@@ -470,6 +470,7 @@ function escapeHtml(value) {
 }
 
 const PREVIEW_PAGE_SIZE = 100;
+const PREVIEW_PAGE_SIZES = [25, 50, 100, 200, 500];
 const PREVIEW_MAX_COLUMNS = 200;
 
 function getTablePreviewModel(document, parsed) {
@@ -518,11 +519,12 @@ function sendTablePreviewPage(uri, panel, context, request) {
     );
     return matchesGlobal && matchesColumns;
   });
-  const pageCount = Math.ceil(filteredRows.length / PREVIEW_PAGE_SIZE);
+  const pageSize = PREVIEW_PAGE_SIZES.includes(request.pageSize) ? request.pageSize : PREVIEW_PAGE_SIZE;
+  const pageCount = Math.ceil(filteredRows.length / pageSize);
   const requestedPage = Number.isInteger(request.page) ? request.page : 0;
   const page = pageCount === 0 ? 0 : Math.min(Math.max(0, requestedPage), pageCount - 1);
   const rows = filteredRows
-    .slice(page * PREVIEW_PAGE_SIZE, (page + 1) * PREVIEW_PAGE_SIZE)
+    .slice(page * pageSize, (page + 1) * pageSize)
     .map(({ row }) => Array.from(
       { length: model.columnCount },
       (_, index) => row.cells[index]?.value ?? ''
@@ -532,7 +534,7 @@ function sendTablePreviewPage(uri, panel, context, request) {
     requestId: request.requestId,
     rows,
     page,
-    pageSize: PREVIEW_PAGE_SIZE,
+    pageSize,
     filteredRowCount: filteredRows.length,
     totalRowCount: model.dataRows.length
   });
@@ -545,7 +547,7 @@ function buildTablePreviewHtml(document, parsed) {
         <div class="column-name">${escapeHtml(name)}</div>
         <input class="column-filter" type="search" data-column="${index}" aria-label="Filter ${escapeHtml(name)}" placeholder="Filter column…">
       </th>`).join('');
-  const description = `${dataRows.length.toLocaleString()} rows · ${PREVIEW_PAGE_SIZE} rows per page · delimiter: ${printableDelimiter(parsed.delimiter)}`;
+  const description = `${dataRows.length.toLocaleString()} rows · delimiter: ${printableDelimiter(parsed.delimiter)}`;
   const columnNote = sourceColumnCount > PREVIEW_MAX_COLUMNS
     ? `<p class="description">Showing the first ${PREVIEW_MAX_COLUMNS} of ${sourceColumnCount.toLocaleString()} columns.</p>`
     : '';
@@ -563,21 +565,31 @@ function buildTablePreviewHtml(document, parsed) {
     :root { color-scheme: light dark; }
     * { box-sizing: border-box; }
     body { margin: 0; padding: 16px; color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px); }
+    .title-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .title-bar h1 { margin: 0; font-size: 1.15em; font-weight: 600; overflow-wrap: anywhere; }
+    .title-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex: 0 0 auto; }
+    .icon-button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 5px; color: var(--vscode-icon-foreground, var(--vscode-foreground)); background: transparent; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
+    .icon-button:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+    .icon-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    #window-action[data-window-mode="poppedOut"] .pop-in-icon { display: block; }
+    #window-action[data-window-mode="poppedOut"] .pop-out-icon { display: none; }
+    .pop-in-icon { display: none; }
     .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
-    .toolbar h1 { margin: 0; font-size: 1.15em; font-weight: 600; }
-    #global-filter, .column-filter { color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 3px; padding: 5px 7px; font: inherit; }
+    #global-filter, .column-filter, select, button { color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 3px; padding: 5px 7px; font: inherit; }
     #global-filter { width: min(360px, 100%); }
-    #global-filter:focus, .column-filter:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+    #global-filter:focus, .column-filter:focus, select:focus, button:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
     #result-count { margin-left: auto; opacity: .8; white-space: nowrap; }
     .description { margin: 0 0 12px; opacity: .8; }
     .pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 0 0 10px; }
-    .pagination button { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 0; border-radius: 2px; padding: 5px 10px; font: inherit; cursor: pointer; }
-    .pagination button:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
-    .pagination button:disabled { opacity: .55; cursor: default; }
+    .pagination button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 5px; color: var(--vscode-icon-foreground, var(--vscode-foreground)); background: transparent; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
+    .pagination button:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+    .pagination button:disabled { opacity: .45; cursor: default; }
+    .pagination button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
     #page-status { min-width: 90px; text-align: center; opacity: .85; }
     .table-scroll { max-width: 100%; max-height: calc(100vh - 112px); overflow: auto; border: 1px solid var(--vscode-panel-border, #888); }
     table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
     th, td { min-width: 160px; max-width: 360px; padding: 7px 9px; text-align: left; vertical-align: top; border-right: 1px solid var(--vscode-panel-border, #888); border-bottom: 1px solid var(--vscode-panel-border, #888); overflow-wrap: anywhere; }
+    th.row-number, td.row-number { min-width: 54px; width: 54px; text-align: right; color: var(--vscode-descriptionForeground); }
     th { position: sticky; top: 0; z-index: 1; background: var(--vscode-sideBar-background, var(--vscode-editor-background)); }
     th:last-child, td:last-child { border-right: 0; }
     .column-name { margin-bottom: 5px; font-weight: 600; white-space: normal; }
@@ -588,23 +600,31 @@ function buildTablePreviewHtml(document, parsed) {
   </style>
 </head>
 <body>
-  <div class="toolbar">
+  <div class="title-bar">
     <h1>${escapeHtml(fileName)}</h1>
-    <input id="global-filter" type="search" aria-label="Filter all columns" placeholder="Filter all columns…">
+    <div class="title-actions">
+      <button id="refresh-preview" class="icon-button" type="button" title="Refresh preview" aria-label="Refresh preview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-4L3 10"/><path d="M3 4v6h6"/><path d="M4 13a8 8 0 0 0 14.9 4L21 14"/><path d="M21 20v-6h-6"/></svg></button>
+      <button id="window-action" class="icon-button" data-window-mode="main" type="button" title="Pop out preview" aria-label="Pop out preview"><svg class="pop-out-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/></svg><svg class="pop-in-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3 12 12"/><path d="M12 6v6h6"/><path d="M15 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h7"/></svg></button>
+    </div>
+  </div>
+  <div class="toolbar">
+    <input id="global-filter" type="search" aria-label="Filter all columns" placeholder="Filter all columns…"${columnCount === 0 ? ' disabled' : ''}>
+    <label for="page-size">Rows per page</label>
+    <select id="page-size" aria-label="Rows per page"${columnCount === 0 ? ' disabled' : ''}>${PREVIEW_PAGE_SIZES.map(size => `<option value="${size}"${size === PREVIEW_PAGE_SIZE ? ' selected' : ''}>${size}</option>`).join('')}</select>
     <span id="result-count" aria-live="polite"></span>
   </div>
   <p class="description">${escapeHtml(description)}</p>
   ${columnNote}
   ${columnCount === 0 ? '<p class="empty">No delimited data to preview.</p>' : `
   <div class="pagination" aria-label="Table pagination">
-    <button id="previous-page" type="button">Previous</button>
+    <button id="previous-page" type="button" title="Previous page" aria-label="Previous page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 18l-6-6 6-6"/></svg></button>
     <span id="page-status" aria-live="polite">Loading…</span>
-    <button id="next-page" type="button">Next</button>
+    <button id="next-page" type="button" title="Next page" aria-label="Next page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 18l6-6-6-6"/></svg></button>
   </div>
   <div class="table-scroll">
     <table>
-      <thead><tr>${tableHeader}</tr></thead>
-      <tbody id="preview-rows"><tr><td colspan="${columnCount}">Loading…</td></tr></tbody>
+      <thead><tr><th class="row-number" scope="col">#</th>${tableHeader}</tr></thead>
+      <tbody id="preview-rows"><tr><td colspan="${columnCount + 1}">Loading…</td></tr></tbody>
     </table>
   </div>`}
   <script nonce="${nonce}">
@@ -612,14 +632,37 @@ function buildTablePreviewHtml(document, parsed) {
       const globalFilter = document.getElementById('global-filter');
       const columnFilters = [...document.querySelectorAll('.column-filter')];
       const count = document.getElementById('result-count');
+      const pageSizeSelect = document.getElementById('page-size');
+      const windowAction = document.getElementById('window-action');
+      const api = acquireVsCodeApi();
+      windowAction.addEventListener('click', () => {
+        windowAction.disabled = true;
+        api.postMessage({ type: 'windowAction' });
+      });
+      document.getElementById('refresh-preview').addEventListener('click', () => api.postMessage({ type: 'refresh' }));
+      window.addEventListener('message', event => {
+        const message = event.data;
+        if (message?.type === 'windowMode') {
+          const isPoppedOut = message.mode === 'poppedOut';
+          windowAction.dataset.windowMode = isPoppedOut ? 'poppedOut' : 'main';
+          windowAction.title = isPoppedOut ? 'Pop in preview' : 'Pop out preview';
+          windowAction.setAttribute('aria-label', windowAction.title);
+          windowAction.disabled = false;
+        } else if (message?.type === 'refreshError') {
+          count.textContent = 'Refresh failed: ' + message.message;
+        } else if (message?.type === 'windowActionError') {
+          windowAction.disabled = false;
+        }
+      });
+      api.postMessage({ type: 'ready' });
       if (${columnCount > 0}) {
-        const api = acquireVsCodeApi();
         const body = document.getElementById('preview-rows');
         const previous = document.getElementById('previous-page');
         const next = document.getElementById('next-page');
         const pageStatus = document.getElementById('page-status');
         let currentPage = 0;
         let requestId = 0;
+        let filterTimer;
         function requestPage(page) {
           currentPage = page;
           requestId += 1;
@@ -630,6 +673,7 @@ function buildTablePreviewHtml(document, parsed) {
             type: 'query',
             requestId,
             page: currentPage,
+            pageSize: Number(pageSizeSelect.value),
             globalTerm: globalFilter.value,
             columnTerms
           });
@@ -641,6 +685,11 @@ function buildTablePreviewHtml(document, parsed) {
           const fragment = document.createDocumentFragment();
           for (const values of message.rows) {
             const row = document.createElement('tr');
+            const number = document.createElement('th');
+            number.className = 'row-number';
+            number.scope = 'row';
+            number.textContent = (currentPage * message.pageSize + fragment.childElementCount + 1).toLocaleString();
+            row.appendChild(number);
             for (const value of values) {
               const cell = document.createElement('td');
               cell.textContent = value;
@@ -651,7 +700,7 @@ function buildTablePreviewHtml(document, parsed) {
           if (message.rows.length === 0) {
             const row = document.createElement('tr');
             const cell = document.createElement('td');
-            cell.colSpan = ${columnCount};
+            cell.colSpan = ${columnCount + 1};
             cell.textContent = 'No rows match these filters.';
             row.appendChild(cell);
             fragment.appendChild(row);
@@ -663,10 +712,15 @@ function buildTablePreviewHtml(document, parsed) {
           previous.disabled = currentPage <= 0;
           next.disabled = currentPage + 1 >= pageCount;
         });
+        function scheduleFilter() {
+          clearTimeout(filterTimer);
+          filterTimer = setTimeout(() => requestPage(0), 150);
+        }
         previous.addEventListener('click', () => requestPage(currentPage - 1));
         next.addEventListener('click', () => requestPage(currentPage + 1));
-        globalFilter.addEventListener('input', () => requestPage(0));
-        columnFilters.forEach(input => input.addEventListener('input', () => requestPage(0)));
+        globalFilter.addEventListener('input', scheduleFilter);
+        columnFilters.forEach(input => input.addEventListener('input', scheduleFilter));
+        pageSizeSelect.addEventListener('change', () => requestPage(0));
         requestPage(0);
       }
     })();
@@ -677,12 +731,19 @@ function buildTablePreviewHtml(document, parsed) {
 
 function refreshTablePreview(document, context) {
   const panel = context.previewPanels.get(document.uri.toString());
-  if (!panel || !isCsvDocument(document, context)) return;
+  if (!panel || !isCsvDocument(document, context)) return false;
   panel.webview.html = buildTablePreviewHtml(document, getParsed(document, context));
+  return true;
 }
 
-function showTablePreview(context) {
-  const document = vscode.window.activeTextEditor?.document;
+async function showTablePreview(context, resource) {
+  let document;
+  try {
+    document = resource ? await vscode.workspace.openTextDocument(resource) : vscode.window.activeTextEditor?.document;
+  } catch (error) {
+    vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+    return;
+  }
   if (!document) return;
   if (!isCsvDocument(document, context)) {
     vscode.window.showWarningMessage('AnyaCSV could not identify this file as delimited data. Use “AnyaCSV: Enable for Current File” first.');
@@ -695,22 +756,52 @@ function showTablePreview(context) {
     panel = vscode.window.createWebviewPanel(
       'anyacsv.tablePreview',
       'AnyaCSV Table Preview',
-      vscode.ViewColumn.Active,
+      vscode.ViewColumn.Beside,
       { enableScripts: true, localResourceRoots: [] }
     );
     context.previewPanels.set(uri, panel);
+    context.previewWindowModes.set(uri, 'main');
     const messageListener = panel.webview.onDidReceiveMessage(message => {
       if (message?.type === 'query') sendTablePreviewPage(uri, panel, context, message);
+      if (message?.type === 'ready') {
+        void panel.webview.postMessage({ type: 'windowMode', mode: context.previewWindowModes.get(uri) || 'main' });
+      }
+      if (message?.type === 'windowAction') {
+        const currentMode = context.previewWindowModes.get(uri) || 'main';
+        const isPoppedOut = currentMode === 'poppedOut';
+        const command = isPoppedOut
+          ? 'workbench.action.restoreEditorsToMainWindow'
+          : 'workbench.action.moveEditorToNewWindow';
+        void vscode.commands.executeCommand(command).then(() => {
+          const nextMode = isPoppedOut ? 'main' : 'poppedOut';
+          context.previewWindowModes.set(uri, nextMode);
+          void panel.webview.postMessage({ type: 'windowMode', mode: nextMode });
+        }, error => {
+          vscode.window.showErrorMessage(`Could not ${isPoppedOut ? 'pop in' : 'pop out'} the CSV preview: ${error instanceof Error ? error.message : String(error)}`);
+          void panel.webview.postMessage({ type: 'windowActionError' });
+        });
+      }
+      if (message?.type === 'refresh') {
+        const sourceDocument = vscode.workspace.textDocuments.find(item => item.uri.toString() === uri);
+        try {
+          if (!sourceDocument || !refreshTablePreview(sourceDocument, context)) {
+            throw new Error('The source is no longer recognized as delimited data.');
+          }
+        } catch (error) {
+          void panel.webview.postMessage({ type: 'refreshError', message: error instanceof Error ? error.message : String(error) });
+        }
+      }
     });
     context.hostSubscriptions.push(messageListener);
     context.hostSubscriptions.push(panel.onDidDispose(() => {
       messageListener.dispose();
       context.previewPanels.delete(uri);
+      context.previewWindowModes.delete(uri);
     }));
   }
   panel.title = `AnyaCSV: ${path.basename(document.uri.fsPath) || 'CSV Table'}`;
   panel.webview.html = buildTablePreviewHtml(document, getParsed(document, context));
-  panel.reveal(vscode.ViewColumn.Active);
+  panel.reveal(vscode.ViewColumn.Beside);
 }
 
 async function applyDocumentDelimiter(document, delimiter, extensionContext, hostContext) {
@@ -774,6 +865,7 @@ function activate(context) {
     parseCache: new Map(),
     timers: new Map(),
     previewPanels: new Map(),
+    previewWindowModes: new Map(),
     lastLanguageByUri: new Map(),
     workspaceState: context.workspaceState
   };
@@ -851,7 +943,7 @@ function activate(context) {
   }));
 
   context.subscriptions.push(vscode.commands.registerCommand('anyacsv.showLint', () => showLint(extensionContext)));
-  context.subscriptions.push(vscode.commands.registerCommand('anyacsv.previewTable', () => showTablePreview(extensionContext)));
+  context.subscriptions.push(vscode.commands.registerCommand('anyacsv.previewTable', resource => showTablePreview(extensionContext, resource)));
   context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(document => {
     observeLanguage(document, extensionContext, context);
     refreshDocument(document, extensionContext);
