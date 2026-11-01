@@ -411,13 +411,30 @@ function updateStatus(context) {
   const diagnostics = context.diagnostics.get(editor.document.uri) || [];
   const errors = diagnostics.filter(item => item.severity === vscode.DiagnosticSeverity.Error).length;
   const warnings = diagnostics.length - errors;
-  const summary = diagnostics.length === 0
-    ? '$(check) CSV: clean'
-    : `$(warning) CSV: ${diagnostics.length} issue${diagnostics.length === 1 ? '' : 's'}`;
-  context.statusBar.text = summary;
-  context.statusBar.tooltip = `${errors} error${errors === 1 ? '' : 's'}, ${warnings} warning${warnings === 1 ? '' : 's'} · delimiter: ${printableDelimiter(getParsed(editor.document, context).delimiter)} · Click to show lint`;
+  const isValid = diagnostics.length === 0;
+  const topIssue = diagnostics.find(item => item.severity === vscode.DiagnosticSeverity.Error) || diagnostics[0];
+  const diagnosticDetails = diagnostics.slice(0, 5).map(diagnostic =>
+    `Line ${diagnostic.range.start.line + 1}: ${diagnostic.message}`
+  );
+  if (diagnostics.length > diagnosticDetails.length) {
+    diagnosticDetails.push(`And ${diagnostics.length - diagnosticDetails.length} more; click to view all.`);
+  }
+  context.statusBar.text = topIssue
+    ? `$(circle-filled) CSV: ${formatStatusBarIssue(`Line ${topIssue.range.start.line + 1}: ${topIssue.message}`)}`
+    : '$(circle-filled) CSV';
+  context.statusBar.color = isValid
+    ? new vscode.ThemeColor('testing.iconPassed')
+    : new vscode.ThemeColor('testing.iconFailed');
+  context.statusBar.tooltip = isValid
+    ? 'No CSV lint issues. Click to refresh lint.'
+    : `${diagnosticDetails.join('\n')}\n${errors} error${errors === 1 ? '' : 's'} and ${warnings} warning${warnings === 1 ? '' : 's'}. Click to refresh lint.`;
   context.statusBar.command = 'anyacsv.showLint';
   context.statusBar.show();
+}
+
+function formatStatusBarIssue(message) {
+  const normalized = message.replace(/\s+/g, ' ').trim();
+  return normalized.length > 80 ? `${normalized.slice(0, 79)}…` : normalized;
 }
 
 function updateDecorations(editor, context) {
@@ -446,9 +463,9 @@ function updateDecorations(editor, context) {
 async function showLint(context) {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isCsvDocument(editor.document, context)) return;
+  refreshDocument(editor.document, context);
   const diagnostics = context.diagnostics.get(editor.document.uri) || [];
   if (diagnostics.length === 0) {
-    vscode.window.showInformationMessage('AnyaCSV: no lint issues found.');
     return;
   }
   const choices = diagnostics.map(diagnostic => ({
@@ -816,7 +833,7 @@ function buildTablePreviewHtml(document, parsed) {
   <style>
     :root { color-scheme: light dark; }
     * { box-sizing: border-box; }
-    body { margin: 0; padding: 0 18px 18px; color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px); }
+    body { display: flex; flex-direction: column; height: 100vh; margin: 0; overflow: hidden; padding: 0 18px 12px; color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px); }
     .title-bar { display: flex; align-items: center; gap: 12px; }
     .title-bar h1 { margin: 18px 0 12px; font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
     .title-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex: 0 0 auto; }
@@ -837,14 +854,16 @@ function buildTablePreviewHtml(document, parsed) {
     #global-filter:focus, .column-filter:focus, select:focus, button:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
     #result-count { margin-left: auto; opacity: .8; white-space: nowrap; }
     .description { margin: 0 0 12px; opacity: .8; }
-    .pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 10px 0 0; }
-    .page-size-control { margin-bottom: 10px; }
+    .table-pagination { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 8px; margin: 0 0 8px; }
+    .pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 0; }
+    .page-size-control { margin: 4px 0 0; }
+    .page-info { flex: 0 0 auto; margin: 0; text-align: right; opacity: .85; }
     .pagination button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 5px; color: var(--vscode-icon-foreground, var(--vscode-foreground)); background: transparent; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
     .pagination button:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
     .pagination button:disabled { opacity: .45; cursor: default; }
     .pagination button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-    #page-status { min-width: 90px; text-align: center; opacity: .85; }
-    .table-scroll { max-width: 100%; max-height: calc(100vh - 150px); overflow: auto; border: 1px solid var(--vscode-panel-border, #888); }
+    #page-status { min-width: 90px; }
+    .table-scroll { flex: 1 1 auto; min-height: 0; max-width: 100%; overflow: auto; border: 1px solid var(--vscode-panel-border, #888); }
     table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
     th, td { min-width: 160px; max-width: 360px; padding: 7px 9px; text-align: left; vertical-align: top; border-right: 1px solid var(--vscode-panel-border, #888); border-bottom: 1px solid var(--vscode-panel-border, #888); overflow-wrap: anywhere; }
     th.row-number, td.row-number { min-width: 54px; width: 54px; text-align: right; color: var(--vscode-descriptionForeground); }
@@ -874,6 +893,13 @@ function buildTablePreviewHtml(document, parsed) {
   <p class="description">${escapeHtml(description)}</p>
   ${columnNote}
   ${columnCount === 0 ? '<p class="empty">No delimited data to preview.</p>' : `
+  <div class="table-pagination">
+    <div class="page-info"><span id="page-status" aria-live="polite">Loading…</span></div>
+    <div class="pagination" aria-label="Table pagination">
+      <button id="previous-page" type="button" title="Previous page" aria-label="Previous page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 18l-6-6 6-6"/></svg></button>
+      <button id="next-page" type="button" title="Next page" aria-label="Next page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 18l6-6-6-6"/></svg></button>
+    </div>
+  </div>
   <div class="table-scroll">
     <table>
       <thead><tr><th class="row-number" scope="col">#</th>${tableHeader}</tr></thead>
@@ -884,11 +910,6 @@ function buildTablePreviewHtml(document, parsed) {
   <div class="pagination page-size-control">
     <label for="page-size">Rows per page</label>
     <select id="page-size" aria-label="Rows per page">${PREVIEW_PAGE_SIZES.map(size => `<option value="${size}"${size === PREVIEW_PAGE_SIZE ? ' selected' : ''}>${size}</option>`).join('')}</select>
-  </div>
-  <div class="pagination" aria-label="Table pagination">
-    <button id="previous-page" type="button" title="Previous page" aria-label="Previous page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 18l-6-6 6-6"/></svg></button>
-    <span id="page-status" aria-live="polite">Loading…</span>
-    <button id="next-page" type="button" title="Next page" aria-label="Next page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 18l6-6-6-6"/></svg></button>
   </div>` : ''}
   <script nonce="${nonce}">
     (() => {
@@ -992,7 +1013,9 @@ function buildTablePreviewHtml(document, parsed) {
           body.replaceChildren(fragment);
           count.textContent = message.filteredRowCount.toLocaleString() + ' matching / ' + message.totalRowCount.toLocaleString() + ' rows';
           const pageCount = Math.ceil(message.filteredRowCount / message.pageSize);
-          pageStatus.textContent = pageCount ? 'Page ' + (currentPage + 1).toLocaleString() + ' of ' + pageCount.toLocaleString() : 'Page 0 of 0';
+          pageStatus.textContent = pageCount
+            ? 'Page ' + (currentPage + 1).toLocaleString() + ' of ' + pageCount.toLocaleString() + ' · ' + message.filteredRowCount.toLocaleString() + ' rows'
+            : 'Page 0 of 0 · 0 rows';
           previous.disabled = currentPage <= 0;
           next.disabled = currentPage + 1 >= pageCount;
         });
