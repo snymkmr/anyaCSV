@@ -11,7 +11,7 @@ AnyaCSV brings delimiter-aware editing to VS Code for CSV and other delimited te
 - Colors columns consistently using an 18-color palette supplied by the active VS Code theme, so long rows have more distinct colors and theme changes are respected.
 - Hover over a value to see its column number, header name when available, row, and separator.
 - Lints malformed quoting and rows with a different number of columns. Click the **CSV** status item at the bottom to review issues.
-- Open **AnyaCSV: Preview as Table** from the Command Palette or the table icon in the editor title bar for an interactive table in the current editor group, with 100 rows per page, global search, and a filter under every column heading, including the first column. Search and column filters cover all rows. The preview refreshes when the source file or AnyaCSV settings change.
+- Open **AnyaCSV: Preview as Table** from the Command Palette or editor title bar, or right-click a CSV or `.txt` file and choose **Preview as Table**. For `.txt`, AnyaCSV must detect a consistent delimiter (or you can set one). The preview opens a side-by-side table with global and per-column filters, adjustable page size, row numbers, and pop-out. Use the exact-filter icon beside **Export** to switch between substring and exact-value matching. The green **Export** button saves all rows matching the current filters as a real Excel workbook (`.xlsx`); it exports the full filtered result, not only the visible page. Values are stored as text so Excel keeps identifiers, dates, and formula-like strings as shown, and the source file is unchanged. The preview refreshes when the source file or AnyaCSV settings change.
 
 Choose a mode from VS Code's language selector in the bottom-right corner:
 
