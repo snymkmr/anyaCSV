@@ -59,3 +59,7 @@ Example setting for separators such as `::` and `^`:
 ```json
 "anyacsv.autoDetectSeparators": ["::", "^"]
 ```
+
+## Privacy
+
+See the [Privacy Policy](https://sanyam.dev/privacy) for privacy information about my projects.
