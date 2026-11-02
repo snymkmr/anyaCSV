@@ -762,7 +762,7 @@ function updateDecorations(editor, context) {
   const startedAt = context.decorationStartTimes?.get(uri);
   if (startedAt !== undefined) {
     context.decorationStartTimes.delete(uri);
-    console.info(`[AnyaCSV] Initial column colors for ${path.basename(document.uri.fsPath) || 'CSV'} applied in ${Date.now() - startedAt} ms.`);
+    console.info(`[AnyaCSV] Initial column colors applied in ${Date.now() - startedAt} ms.`);
   }
 }
 

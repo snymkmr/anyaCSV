@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.5
+
+- Keep initial column-color timing diagnostics anonymous by logging elapsed time without the file name.
+
 ## 0.2.4
 
 - Stream large table previews from disk, avoiding VS Code's 50 MB text document synchronization limit. Partial previews are limited to 10,000 rows and disable Excel export.
