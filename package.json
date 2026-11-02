@@ -3,7 +3,7 @@
   "displayName": "AnyaCSV",
   "icon": "assets/CSV-icon-256.png",
   "description": "Detect, preview, and lint CSV and other delimited files.",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "publisher": "Sanyam",
   "repository": {
     "type": "git",
@@ -17,6 +17,12 @@
     "Other"
   ],
   "activationEvents": [
+    "onLanguage:csv",
+    "onLanguage:tsv",
+    "onLanguage:csv (semicolon)",
+    "onLanguage:csv (whitespace)",
+    "onLanguage:csv (pipe)",
+    "onLanguage:dynamic csv",
     "onStartupFinished"
   ],
   "main": "./extension.js",
@@ -121,6 +127,11 @@
         }
       ],
       "explorer/context": [
+        {
+          "command": "anyacsv.showLint",
+          "when": "resourceExtname == .csv || resourceExtname == .tsv || resourceExtname == .tab || resourceExtname == .psv || resourceExtname == .ssv || resourceExtname == .dsv || resourceExtname == .txt",
+          "group": "2_workspace@0"
+        },
         {
           "command": "anyacsv.previewTable",
           "when": "resourceExtname == .csv || resourceExtname == .tsv || resourceExtname == .tab || resourceExtname == .psv || resourceExtname == .ssv || resourceExtname == .dsv || resourceExtname == .txt",

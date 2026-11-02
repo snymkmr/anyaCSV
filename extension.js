@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('node:fs');
+const { StringDecoder } = require('node:string_decoder');
 const { Readable, Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { createDeflateRaw } = require('node:zlib');
@@ -265,7 +266,278 @@ function detectDelimiter(text, quoteCharacter, maxRows, singleRowMinimumColumns,
   return bestScore < 0 ? undefined : winner;
 }
 
-function getParsed(document, context) {
+const LARGE_FILE_PREVIEW_THRESHOLD = 50_000_000;
+const LARGE_FILE_PREVIEW_MAX_ROWS = 10000;
+const LARGE_FILE_PREVIEW_MAX_CHARS = 10_000_000;
+
+function countCsvLineBreaks(text) {
+  return (text.match(/\r\n|\r|\n/g) || []).length;
+}
+
+function csvRecordLocation(record, offset) {
+  const prefix = record.text.slice(0, offset);
+  const lastLineBreak = Math.max(prefix.lastIndexOf('\n'), prefix.lastIndexOf('\r'));
+  return {
+    line: record.line + countCsvLineBreaks(prefix),
+    column: prefix.length - lastLineBreak
+  };
+}
+
+async function* streamCsvRecords(filePath, delimiter, quoteCharacter, totalBytes, onProgress) {
+  const input = fs.createReadStream(filePath);
+  const decoder = new StringDecoder('utf8');
+  const quote = quoteCharacter && quoteCharacter.length === 1 ? quoteCharacter : '';
+  const whitespaceMode = delimiter === 'whitespace';
+  let buffer = '';
+  let rowParts = [];
+  let inQuotes = false;
+  let fieldStart = true;
+  let atFileStart = true;
+  let bytesRead = 0;
+  let rowStartLine = 1;
+
+  const consumeAvailable = (text, isFinalChunk) => {
+    const records = [];
+    let index = 0;
+    let segmentStart = 0;
+    while (index < text.length) {
+      const character = text[index];
+      if (atFileStart) {
+        atFileStart = false;
+        if (character === '\uFEFF') {
+          index += 1;
+          continue;
+        }
+      }
+      if (inQuotes) {
+        if (character === quote) {
+          if (index + 1 >= text.length && !isFinalChunk) break;
+          if (text[index + 1] === quote) {
+            index += 2;
+          } else {
+            inQuotes = false;
+            fieldStart = false;
+            index += 1;
+          }
+        } else {
+          index += 1;
+        }
+        continue;
+      }
+
+      if (!whitespaceMode && delimiter) {
+        const remaining = text.length - index;
+        if (remaining < delimiter.length && !isFinalChunk && delimiter.startsWith(text.slice(index))) break;
+        if (text.startsWith(delimiter, index)) {
+          fieldStart = true;
+          index += delimiter.length;
+          continue;
+        }
+      }
+      if (whitespaceMode && character !== '\r' && character !== '\n' && /\s/.test(character)) {
+        fieldStart = true;
+        index += 1;
+        continue;
+      }
+      if (quote && character === quote && fieldStart) {
+        inQuotes = true;
+        fieldStart = false;
+        index += 1;
+        continue;
+      }
+      if (character === '\r' || character === '\n') {
+        if (character === '\r' && index + 1 >= text.length && !isFinalChunk) break;
+        rowParts.push(text.slice(segmentStart, index));
+        const recordText = rowParts.join('');
+        records.push({ text: recordText, line: rowStartLine });
+        rowStartLine += countCsvLineBreaks(recordText) + 1;
+        rowParts = [];
+        index += character === '\r' && text[index + 1] === '\n' ? 2 : 1;
+        segmentStart = index;
+        fieldStart = true;
+        continue;
+      }
+      fieldStart = false;
+      index += 1;
+    }
+    rowParts.push(text.slice(segmentStart, index));
+    return { records, remainder: text.slice(index) };
+  };
+
+  for await (const chunk of input) {
+    const bytes = typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
+    bytesRead += bytes;
+    if (onProgress) onProgress(bytesRead, totalBytes);
+    buffer += typeof chunk === 'string' ? chunk : decoder.write(chunk);
+    const consumed = consumeAvailable(buffer, false);
+    for (const record of consumed.records) yield record;
+    buffer = consumed.remainder;
+  }
+
+  buffer += decoder.end();
+  const consumed = consumeAvailable(buffer, true);
+  for (const record of consumed.records) yield record;
+  buffer = consumed.remainder;
+  const finalRecord = rowParts.join('') + buffer;
+  if (finalRecord.length > 0) yield { text: finalRecord, line: rowStartLine };
+}
+
+async function readLargeCsvSample(filePath, maxBytes = 65536) {
+  const handle = await fs.promises.open(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(maxBytes);
+    const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
+function largeCsvLanguageId(extension) {
+  if (extension === '.tsv' || extension === '.tab') return 'tsv';
+  if (extension === '.ssv') return 'csv (semicolon)';
+  if (extension === '.psv') return 'csv (pipe)';
+  return 'csv';
+}
+
+async function buildLargeCsvTablePreview(uri, context, languageId, onProgress, options = {}) {
+  const filePath = uri.fsPath;
+  const stat = await fs.promises.stat(filePath);
+  const document = { uri, languageId };
+  const config = vscode.workspace.getConfiguration('anyacsv', uri);
+  const quoteCharacter = config.get('quoteCharacter', '"');
+  const requested = configuredDelimiter(document, context);
+  const autoDetect = config.get('autoDetect', true);
+  const sampleRows = config.get('autoDetectSampleRows', 20);
+  const configuredSeparators = config.get('autoDetectSeparators', []);
+  const additionalSeparators = Array.isArray(configuredSeparators)
+    ? configuredSeparators
+      .filter(item => typeof item === 'string' && item.length > 0 && !/[\r\n]/.test(item))
+      .map(item => item === '\\t' ? '\t' : item)
+    : [];
+  const sample = await readLargeCsvSample(filePath);
+  const autoDetectedDelimiter = !options.delimiter && requested === 'auto' && autoDetect
+    ? detectDelimiter(
+      sample,
+      quoteCharacter,
+      sampleRows,
+      languageId === 'plaintext' && !context.enabledDocuments.has(uri.toString()) ? 3 : 2,
+      additionalSeparators
+    )
+    : undefined;
+  if (languageId === 'plaintext'
+    && !context.enabledDocuments.has(uri.toString())
+    && requested === 'auto'
+    && !autoDetectedDelimiter
+    && !options.delimiter) {
+    throw new Error('AnyaCSV could not identify this file as delimited data. Set a delimiter or enable AnyaCSV for this file.');
+  }
+  const delimiter = options.delimiter || (requested && requested !== 'auto' ? requested : autoDetectedDelimiter || ',');
+  const headerRowSetting = config.get('headerRow', 1);
+  const headerIndex = Number.isInteger(headerRowSetting) && headerRowSetting > 0 ? headerRowSetting - 1 : -1;
+  const ignoreEmptyLines = config.get('ignoreEmptyLines', true);
+  const rows = [];
+  let header;
+  let hasHeader = false;
+  let sourceColumnCount = 0;
+  let totalDataRowCount = 0;
+  let previewCharacterCount = 0;
+  let previewLimitReached = false;
+  let lintIssueCount = 0;
+  let hasMultipleColumns = false;
+  const lintIssues = [];
+  const pendingWidths = [];
+  let baseline;
+  let rowIndex = 0;
+  const addLintIssue = (severity, line, column, message) => {
+    lintIssueCount += 1;
+    if (lintIssues.length < 10) lintIssues.push({ severity, line, column, message });
+  };
+  const checkWidth = (width, line) => {
+    if (baseline !== undefined && width !== baseline) {
+      addLintIssue('Warning', line, 1, `Expected ${baseline} columns but found ${width}.`);
+    }
+  };
+  const finalizePendingWidths = () => {
+    if (baseline === undefined) baseline = pendingWidths[0]?.width;
+    for (let index = 1; index < pendingWidths.length; index += 1) {
+      checkWidth(pendingWidths[index].width, pendingWidths[index].line);
+    }
+    pendingWidths.length = 0;
+  };
+
+  for await (const record of streamCsvRecords(filePath, delimiter, quoteCharacter, stat.size, onProgress)) {
+    const parsed = record.text.length === 0
+      ? { rows: [{ start: 0, end: 0, cells: [{ start: 0, end: 0, value: '', quoted: false }], blank: true }] }
+      : parseDelimited(record.text, delimiter, quoteCharacter);
+    for (const error of parsed.errors) {
+      const location = csvRecordLocation(record, error.start);
+      addLintIssue('Error', location.line, location.column, error.message);
+    }
+    const row = parsed.rows[0];
+    if (!row) {
+      rowIndex += 1;
+      continue;
+    }
+    if (row.cells.length > 1) hasMultipleColumns = true;
+    const isEligible = !(ignoreEmptyLines && row.blank);
+    if (rowIndex === headerIndex && isEligible) {
+      header = row;
+      hasHeader = true;
+      sourceColumnCount = Math.max(sourceColumnCount, row.cells.length);
+      baseline = row.cells.length;
+      for (const pending of pendingWidths) checkWidth(pending.width, pending.line);
+      pendingWidths.length = 0;
+    } else if (rowIndex === headerIndex && !isEligible) {
+      finalizePendingWidths();
+    } else if (isEligible) {
+      sourceColumnCount = Math.max(sourceColumnCount, row.cells.length);
+      totalDataRowCount += 1;
+      if (headerIndex >= 0 && !hasHeader && rowIndex < headerIndex) {
+        pendingWidths.push({ width: row.cells.length, line: record.line });
+      } else {
+        if (baseline === undefined) baseline = row.cells.length;
+        else checkWidth(row.cells.length, record.line);
+      }
+      if (!previewLimitReached && rows.length < LARGE_FILE_PREVIEW_MAX_ROWS) {
+        const rowCharacters = row.cells.reduce((total, cell) => total + cell.value.length, 0);
+        if (previewCharacterCount + rowCharacters <= LARGE_FILE_PREVIEW_MAX_CHARS) {
+          rows.push({ row, index: rowIndex });
+          previewCharacterCount += rowCharacters;
+        } else {
+          previewLimitReached = true;
+        }
+      }
+    }
+    rowIndex += 1;
+  }
+
+  if (!hasHeader) finalizePendingWidths();
+
+  if (header) sourceColumnCount = Math.max(sourceColumnCount, header.cells.length);
+  const columnCount = Math.min(sourceColumnCount, PREVIEW_MAX_COLUMNS);
+  const headers = Array.from({ length: columnCount }, (_, index) => {
+    const name = hasHeader ? header.cells[index]?.value.trim() : '';
+    return name || `Column ${index + 1}`;
+  });
+  return {
+    dataRows: rows,
+    sourceColumnCount,
+    columnCount,
+    headers,
+    delimiter,
+    quoteCharacter,
+    sourceTotalRowCount: totalDataRowCount,
+    isPartial: totalDataRowCount > rows.length,
+    isLargeFile: true,
+    autoDetected: options.autoDetected ?? Boolean(autoDetectedDelimiter),
+    hasMultipleColumns,
+    lintIssueCount,
+    lintIssues
+  };
+}
+
+function getParsed(document, context, options = {}) {
   const config = vscode.workspace.getConfiguration('anyacsv', document.uri);
   const quoteCharacter = config.get('quoteCharacter', '"');
   const requested = configuredDelimiter(document, context);
@@ -280,6 +552,7 @@ function getParsed(document, context) {
   const cached = context.parseCache.get(document.uri.toString());
   if (cached
     && cached.version === document.version
+    && cached.delimiterOverride === options.delimiter
     && cached.quoteCharacter === quoteCharacter
     && cached.requested === requested
     && cached.autoDetect === autoDetect
@@ -287,7 +560,7 @@ function getParsed(document, context) {
     && cached.additionalSeparatorsKey === JSON.stringify(additionalSeparators)) {
     return cached;
   }
-  const autoDetectedDelimiter = requested === 'auto' && autoDetect
+  const autoDetectedDelimiter = !options.delimiter && requested === 'auto' && autoDetect
     ? detectDelimiter(
       document.getText(),
       quoteCharacter,
@@ -296,17 +569,18 @@ function getParsed(document, context) {
       additionalSeparators
     )
     : undefined;
-  const delimiter = requested && requested !== 'auto' ? requested : (autoDetectedDelimiter || ',');
+  const delimiter = options.delimiter || (requested && requested !== 'auto' ? requested : (autoDetectedDelimiter || ','));
   const parsed = parseDelimited(document.getText(), delimiter, quoteCharacter);
   const result = {
     version: document.version,
     delimiter,
+    delimiterOverride: options.delimiter,
     quoteCharacter,
     requested,
     autoDetect,
     sampleRows,
     additionalSeparatorsKey: JSON.stringify(additionalSeparators),
-    autoDetected: Boolean(autoDetectedDelimiter),
+    autoDetected: options.delimiter ? Boolean(options.autoDetected) : Boolean(autoDetectedDelimiter),
     ...parsed
   };
   context.parseCache.set(document.uri.toString(), result);
@@ -440,27 +714,125 @@ function formatStatusBarIssue(message) {
 function updateDecorations(editor, context) {
   if (!editor || !isCsvDocument(editor.document, context)) {
     for (const decoration of context.decorations) editor?.setDecorations(decoration, []);
+    if (editor) context.decorationStartTimes?.delete(editor.document.uri.toString());
     return;
   }
-  const parsed = getParsed(editor.document, context);
+  const document = editor.document;
+  const parsed = getParsed(document, context);
+  const visibleRanges = editor.visibleRanges
+    .map(range => ({ start: document.offsetAt(range.start), end: document.offsetAt(range.end) }))
+    .filter(range => range.end > range.start)
+    .sort((left, right) => left.start - right.start);
+  const mergedVisibleRanges = [];
+  for (const range of visibleRanges) {
+    const previous = mergedVisibleRanges[mergedVisibleRanges.length - 1];
+    if (previous && range.start <= previous.end) previous.end = Math.max(previous.end, range.end);
+    else mergedVisibleRanges.push({ ...range });
+  }
   const ranges = COLOR_IDS.map(() => []);
   let count = 0;
-  for (const row of parsed.rows) {
-    for (let column = 0; column < row.cells.length; column += 1) {
-      const cell = row.cells[column];
-      if (cell.end > cell.start && count < 50000) {
-        ranges[column % ranges.length].push(new vscode.Range(
-          editor.document.positionAt(cell.start),
-          editor.document.positionAt(cell.end)
-        ));
-        count += 1;
-      }
+  for (const visibleRange of mergedVisibleRanges) {
+    let low = 0;
+    let high = parsed.rows.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (parsed.rows[middle].end <= visibleRange.start) low = middle + 1;
+      else high = middle;
     }
+    for (let rowIndex = low; rowIndex < parsed.rows.length && parsed.rows[rowIndex].start < visibleRange.end; rowIndex += 1) {
+      const row = parsed.rows[rowIndex];
+      for (let column = 0; column < row.cells.length && count < 50000; column += 1) {
+        const cell = row.cells[column];
+        const start = Math.max(cell.start, visibleRange.start);
+        const end = Math.min(cell.end, visibleRange.end);
+        if (end > start) {
+          ranges[column % ranges.length].push(new vscode.Range(
+            document.positionAt(start),
+            document.positionAt(end)
+          ));
+          count += 1;
+        }
+      }
+      if (count >= 50000) break;
+    }
+    if (count >= 50000) break;
   }
   context.decorations.forEach((decoration, index) => editor.setDecorations(decoration, ranges[index]));
+  const uri = document.uri.toString();
+  const startedAt = context.decorationStartTimes?.get(uri);
+  if (startedAt !== undefined) {
+    context.decorationStartTimes.delete(uri);
+    console.info(`[AnyaCSV] Initial column colors for ${path.basename(document.uri.fsPath) || 'CSV'} applied in ${Date.now() - startedAt} ms.`);
+  }
 }
 
-async function showLint(context) {
+function markDecorationStart(document, context) {
+  const uri = document.uri.toString();
+  if (!context.decorationStartTimes.has(uri)) context.decorationStartTimes.set(uri, Date.now());
+}
+
+function updateVisibleDecorations(document, context) {
+  const uri = document.uri.toString();
+  for (const editor of vscode.window.visibleTextEditors) {
+    if (editor.document.uri.toString() === uri) updateDecorations(editor, context);
+  }
+}
+
+async function showLint(context, resource) {
+  const sourceUri = resource || vscode.window.activeTextEditor?.document.uri;
+  if (sourceUri?.scheme === 'file') {
+    const stat = await fs.promises.stat(sourceUri.fsPath).catch(error => {
+      vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+      return undefined;
+    });
+    if (!stat) return;
+    if (stat.size > LARGE_FILE_PREVIEW_THRESHOLD) {
+      const uri = sourceUri.toString();
+      const document = vscode.workspace.textDocuments.find(item => item.uri.toString() === uri);
+      const extension = path.extname(sourceUri.fsPath).toLowerCase();
+      const languageId = document && LANGUAGE_IDS.has(document.languageId)
+        ? document.languageId
+        : (extension === '.txt' || (context.enabledDocuments.has(uri) && !FILE_EXTENSIONS.has(extension))
+          ? 'plaintext'
+          : largeCsvLanguageId(extension));
+      if (!FILE_EXTENSIONS.has(extension)
+        && !TEXT_EXTENSIONS.has(extension)
+        && !context.enabledDocuments.has(uri)
+        && !(document && LANGUAGE_IDS.has(document.languageId))
+        && configuredDelimiter({ uri: sourceUri, languageId }, context) === 'auto') {
+        void vscode.window.showWarningMessage('AnyaCSV could not identify this file as delimited data. Use “AnyaCSV: Enable for Current File” first.');
+        return;
+      }
+      try {
+        const model = await vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: `Linting ${path.basename(sourceUri.fsPath)}`,
+          cancellable: false
+        }, progress => {
+          let reportedBytes = 0;
+          return buildLargeCsvTablePreview(sourceUri, context, languageId, (read, total) => {
+            const increment = total ? 100 * (read - reportedBytes) / total : 0;
+            reportedBytes = read;
+            progress.report({ increment, message: total ? `${Math.min(100, Math.round(100 * read / total))}%` : undefined });
+          });
+        });
+        if (model.lintIssueCount === 0) {
+          void vscode.window.showInformationMessage(`${path.basename(sourceUri.fsPath)} has no CSV lint issues.`);
+        } else {
+          const firstIssues = model.lintIssues.slice(0, 3).map(issue => `Line ${issue.line}, column ${issue.column}: ${issue.message}`);
+          const additionalCount = model.lintIssueCount - firstIssues.length;
+          if (additionalCount > 0) firstIssues.push(`And ${additionalCount} more.`);
+          void vscode.window.showWarningMessage(
+            `${path.basename(sourceUri.fsPath)} has ${model.lintIssueCount.toLocaleString()} CSV lint issue${model.lintIssueCount === 1 ? '' : 's'}. ${firstIssues.join(' ')}`
+          );
+        }
+      } catch (error) {
+        void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+      }
+      return;
+    }
+  }
+
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isCsvDocument(editor.document, context)) return;
   refreshDocument(editor.document, context);
@@ -520,8 +892,10 @@ function getTablePreviewModel(document, parsed) {
 
 function sendTablePreviewPage(uri, panel, context, request) {
   const document = vscode.workspace.textDocuments.find(item => item.uri.toString() === uri);
-  if (!document) return;
-  const model = getTablePreviewModel(document, getParsed(document, context));
+  const model = context.largePreviewModels.get(uri)
+    || context.previewModels.get(uri)
+    || (document ? getTablePreviewModel(document, getParsed(document, context)) : undefined);
+  if (!model) return;
   const filteredRows = getFilteredTablePreviewRows(model, request);
   const pageSize = PREVIEW_PAGE_SIZES.includes(request.pageSize) ? request.pageSize : PREVIEW_PAGE_SIZE;
   const pageCount = Math.ceil(filteredRows.length / pageSize);
@@ -540,7 +914,9 @@ function sendTablePreviewPage(uri, panel, context, request) {
     page,
     pageSize,
     filteredRowCount: filteredRows.length,
-    totalRowCount: model.dataRows.length
+    totalRowCount: model.sourceTotalRowCount ?? model.dataRows.length,
+    previewedRowCount: model.dataRows.length,
+    isPartial: model.isPartial === true
   });
 }
 
@@ -788,13 +1164,13 @@ async function writeExcelArchive(target, workbook) {
   }
 }
 
-async function exportTablePreviewForExcel(document, model, request) {
+async function exportTablePreviewForExcel(sourceUri, model, request) {
   const filteredRows = getFilteredTablePreviewRows(model, request);
   const rows = filteredRows.map(({ row }) => Array.from(
     { length: model.columnCount },
     (_, index) => row.cells[index]?.value ?? ''
   ));
-  const sourcePath = document.uri.scheme === 'file' ? document.uri.fsPath : '';
+  const sourcePath = sourceUri.scheme === 'file' ? sourceUri.fsPath : '';
   const sourceName = sourcePath ? path.basename(sourcePath, path.extname(sourcePath)) : 'data';
   const defaultUri = sourcePath
     ? vscode.Uri.file(path.join(path.dirname(sourcePath), `${sourceName}_export.xlsx`))
@@ -809,16 +1185,24 @@ async function exportTablePreviewForExcel(document, model, request) {
   void vscode.window.showInformationMessage(`Exported ${rows.length.toLocaleString()} rows to an Excel workbook.`);
 }
 
-function buildTablePreviewHtml(document, parsed) {
-  const { dataRows, sourceColumnCount, columnCount, headers } = getTablePreviewModel(document, parsed);
+function buildTablePreviewHtml(document, parsed, modelOverride) {
+  const { dataRows, sourceColumnCount, columnCount, headers } = modelOverride || getTablePreviewModel(document, parsed);
   const tableHeader = headers.map((name, index) => `
       <th scope="col">
         <div class="column-name">${escapeHtml(name)}</div>
         <input class="column-filter" type="search" data-column="${index}" aria-label="Filter ${escapeHtml(name)}" placeholder="Filter column…">
       </th>`).join('');
-  const description = `${dataRows.length.toLocaleString()} rows · delimiter: ${printableDelimiter(parsed.delimiter)}`;
+  const totalRowCount = modelOverride?.sourceTotalRowCount ?? dataRows.length;
+  const description = modelOverride?.isLargeFile
+    ? `${dataRows.length.toLocaleString()} loaded of ${totalRowCount.toLocaleString()} rows · delimiter: ${printableDelimiter(parsed.delimiter)}`
+    : `${dataRows.length.toLocaleString()} rows · delimiter: ${printableDelimiter(parsed.delimiter)}`;
   const columnNote = sourceColumnCount > PREVIEW_MAX_COLUMNS
     ? `<p class="description">Showing the first ${PREVIEW_MAX_COLUMNS} of ${sourceColumnCount.toLocaleString()} columns.</p>`
+    : '';
+  const largeFileNote = modelOverride?.isLargeFile
+    ? `<p class="description">Large-file preview reads the saved file from disk. ${modelOverride.isPartial
+      ? 'Filtering covers the loaded rows only; Excel export is unavailable for a partial preview.'
+      : 'All rows are loaded. Save changes before refreshing the preview.'}</p>`
     : '';
   const nonce = crypto.randomBytes(16).toString('hex');
   const fileName = path.basename(document.uri.fsPath) || 'CSV Table';
@@ -843,6 +1227,8 @@ function buildTablePreviewHtml(document, parsed) {
     .icon-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
     .title-actions .excel-export-button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 4px 9px; color: #fff; background: #217346; border: 1px solid #185c37; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
     .title-actions .excel-export-button:hover { background: #185c37; }
+    .title-actions .excel-export-button:disabled { opacity: .45; cursor: default; }
+    .title-actions .excel-export-button:hover:disabled { background: #217346; }
     .title-actions .icon-button[data-exact-match="true"] { background: var(--vscode-toolbar-activeBackground, var(--vscode-list-activeSelectionBackground)); border-color: var(--vscode-focusBorder); }
     .excel-mark { display: inline-grid; place-items: center; width: 17px; height: 17px; border: 1px solid rgba(255,255,255,.8); border-radius: 2px; font-size: 11px; line-height: 1; font-weight: 700; }
     #window-action[data-window-mode="poppedOut"] .pop-in-icon { display: block; }
@@ -853,6 +1239,9 @@ function buildTablePreviewHtml(document, parsed) {
     #global-filter { width: min(360px, 100%); }
     #global-filter:focus, .column-filter:focus, select:focus, button:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
     #result-count { margin-left: auto; opacity: .8; white-space: nowrap; }
+    .refresh-warning { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; padding: 8px 10px; color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); background: var(--vscode-inputValidation-warningBackground, var(--vscode-editor-background)); border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-panel-border)); }
+    .refresh-warning[hidden] { display: none; }
+    .refresh-warning-message { flex: 1 1 auto; }
     .description { margin: 0 0 12px; opacity: .8; }
     .table-pagination { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 8px; margin: 0 0 8px; }
     .pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 0; }
@@ -880,7 +1269,7 @@ function buildTablePreviewHtml(document, parsed) {
   <div class="title-bar">
     <h1>${escapeHtml(fileName)}</h1>
     <div class="title-actions">
-      <button id="export-excel" class="excel-export-button" type="button" title="Export all filtered rows as an Excel workbook (.xlsx)" aria-label="Export all filtered rows as an Excel workbook (.xlsx)"><span class="excel-mark" aria-hidden="true">X</span><span>Export</span></button>
+      <button id="export-excel" class="excel-export-button" type="button"${modelOverride?.isPartial ? ' disabled title="Export is unavailable for a partial large-file preview" aria-label="Export is unavailable for a partial large-file preview"' : ' title="Export all filtered rows as an Excel workbook (.xlsx)" aria-label="Export all filtered rows as an Excel workbook (.xlsx)"'}><span class="excel-mark" aria-hidden="true">X</span><span>Export</span></button>
       <button id="exact-filter" class="icon-button" data-exact-match="false" type="button" aria-pressed="false" title="Exact filtering off" aria-label="Exact filtering off"${columnCount === 0 ? ' disabled' : ''}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7z"/><path d="M16 17h6M16 20h6"/></svg></button>
       <button id="refresh-preview" class="icon-button" type="button" title="Refresh preview" aria-label="Refresh preview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-4L3 10"/><path d="M3 4v6h6"/><path d="M4 13a8 8 0 0 0 14.9 4L21 14"/><path d="M21 20v-6h-6"/></svg></button>
       <button id="window-action" class="icon-button" data-window-mode="main" type="button" title="Pop out preview" aria-label="Pop out preview"><svg class="pop-out-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/></svg><svg class="pop-in-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3 12 12"/><path d="M12 6v6h6"/><path d="M15 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h7"/></svg></button>
@@ -890,8 +1279,13 @@ function buildTablePreviewHtml(document, parsed) {
     <input id="global-filter" type="search" aria-label="Filter all columns" placeholder="Filter all columns…"${columnCount === 0 ? ' disabled' : ''}>
     <span id="result-count" aria-live="polite"></span>
   </div>
+  <div id="refresh-warning" class="refresh-warning" role="status" hidden>
+    <span id="refresh-warning-message" class="refresh-warning-message"></span>
+    <button id="retry-redetect" type="button">Retry / re-detect delimiter</button>
+  </div>
   <p class="description">${escapeHtml(description)}</p>
   ${columnNote}
+  ${largeFileNote}
   ${columnCount === 0 ? '<p class="empty">No delimited data to preview.</p>' : `
   <div class="table-pagination">
     <div class="page-info"><span id="page-status" aria-live="polite">Loading…</span></div>
@@ -916,6 +1310,10 @@ function buildTablePreviewHtml(document, parsed) {
       const globalFilter = document.getElementById('global-filter');
       const columnFilters = [...document.querySelectorAll('.column-filter')];
       const count = document.getElementById('result-count');
+      const refreshWarning = document.getElementById('refresh-warning');
+      const refreshWarningMessage = document.getElementById('refresh-warning-message');
+      const retryRedetect = document.getElementById('retry-redetect');
+      const exportButton = document.getElementById('export-excel');
       const pageSizeSelect = document.getElementById('page-size');
       const windowAction = document.getElementById('window-action');
       const exactFilter = document.getElementById('exact-filter');
@@ -933,6 +1331,10 @@ function buildTablePreviewHtml(document, parsed) {
         api.postMessage({ type: 'windowAction' });
       });
       document.getElementById('refresh-preview').addEventListener('click', () => api.postMessage({ type: 'refresh' }));
+      retryRedetect.addEventListener('click', () => {
+        retryRedetect.disabled = true;
+        api.postMessage({ type: 'refresh', redetect: true });
+      });
       document.getElementById('export-excel').addEventListener('click', () => {
         const columnTerms = columnFilters
           .map(input => ({ index: Number(input.dataset.column), term: input.value }))
@@ -948,7 +1350,10 @@ function buildTablePreviewHtml(document, parsed) {
           windowAction.setAttribute('aria-label', windowAction.title);
           windowAction.disabled = false;
         } else if (message?.type === 'refreshError') {
-          count.textContent = 'Refresh failed: ' + message.message;
+          refreshWarningMessage.textContent = message.message;
+          refreshWarning.hidden = false;
+          retryRedetect.disabled = false;
+          exportButton.disabled = true;
         } else if (message?.type === 'windowActionError') {
           windowAction.disabled = false;
         }
@@ -1011,10 +1416,12 @@ function buildTablePreviewHtml(document, parsed) {
             fragment.appendChild(row);
           }
           body.replaceChildren(fragment);
-          count.textContent = message.filteredRowCount.toLocaleString() + ' matching / ' + message.totalRowCount.toLocaleString() + ' rows';
+          count.textContent = message.isPartial
+            ? message.filteredRowCount.toLocaleString() + ' matching / ' + message.previewedRowCount.toLocaleString() + ' loaded of ' + message.totalRowCount.toLocaleString() + ' rows'
+            : message.filteredRowCount.toLocaleString() + ' matching / ' + message.totalRowCount.toLocaleString() + ' rows';
           const pageCount = Math.ceil(message.filteredRowCount / message.pageSize);
           pageStatus.textContent = pageCount
-            ? 'Page ' + (currentPage + 1).toLocaleString() + ' of ' + pageCount.toLocaleString() + ' · ' + message.filteredRowCount.toLocaleString() + ' rows'
+            ? 'Page ' + (currentPage + 1).toLocaleString() + ' of ' + pageCount.toLocaleString() + ' · ' + message.filteredRowCount.toLocaleString() + (message.isPartial ? ' loaded matching rows' : ' rows')
             : 'Page 0 of 0 · 0 rows';
           previous.disabled = currentPage <= 0;
           next.disabled = currentPage + 1 >= pageCount;
@@ -1036,28 +1443,154 @@ function buildTablePreviewHtml(document, parsed) {
 </html>`;
 }
 
-function refreshTablePreview(document, context) {
-  const panel = context.previewPanels.get(document.uri.toString());
-  if (!panel || !isCsvDocument(document, context)) return false;
-  panel.webview.html = buildTablePreviewHtml(document, getParsed(document, context));
-  return true;
+function postPreviewRefreshError(context, uri, error) {
+  const panel = context.previewPanels.get(uri);
+  if (!panel) return;
+  const reason = error instanceof Error ? error.message : String(error);
+  const isRecognitionFailure = reason.includes('no longer recognized as delimited data')
+    || reason.includes('could not identify this file as delimited data');
+  const message = isRecognitionFailure
+    ? `The source is no longer recognized as delimited data. It may have been edited or emptied. Your previous table is still shown.`
+    : `Refresh failed: ${reason} Your previous table is still shown.`;
+  void panel.webview.postMessage({ type: 'refreshError', message });
+}
+
+function refreshTablePreview(document, context, options = {}) {
+  const uri = document.uri.toString();
+  const panel = context.previewPanels.get(uri);
+  if (!panel) return false;
+
+  const previousDelimiter = context.previewDelimiters.get(uri);
+  const canReuseDelimiter = !options.redetect
+    && previousDelimiter
+    && previousDelimiter.version === context.previewDelimiterVersion;
+  if (!canReuseDelimiter && !isCsvDocument(document, context)) {
+    if (previousDelimiter) {
+      postPreviewRefreshError(context, uri, new Error('The source is no longer recognized as delimited data.'));
+    }
+    return false;
+  }
+
+  try {
+    let parsed = getParsed(document, context, canReuseDelimiter
+      ? { delimiter: previousDelimiter.delimiter, autoDetected: previousDelimiter.autoDetected }
+      : {});
+    let hasMultipleColumns = parsed.rows.some(row => row.cells.length > 1);
+    const cachedDelimiterNoLongerFits = canReuseDelimiter
+      && previousDelimiter.recognized
+      && !hasMultipleColumns;
+    if (cachedDelimiterNoLongerFits && parsed.requested === 'auto' && parsed.autoDetect) {
+      const redetected = getParsed(document, context);
+      const redetectedHasMultipleColumns = redetected.rows.some(row => row.cells.length > 1);
+      if (redetected.autoDetected || redetectedHasMultipleColumns) {
+        parsed = redetected;
+        hasMultipleColumns = redetectedHasMultipleColumns;
+      }
+    }
+
+    const detectionFailed = previousDelimiter?.recognized
+      && parsed.requested === 'auto'
+      && parsed.autoDetect
+      && !parsed.autoDetected
+      && !hasMultipleColumns;
+    if (detectionFailed || (cachedDelimiterNoLongerFits && !hasMultipleColumns)) {
+      throw new Error('The source is no longer recognized as delimited data.');
+    }
+
+    context.previewDelimiters.set(uri, {
+      delimiter: parsed.delimiter,
+      autoDetected: parsed.autoDetected,
+      recognized: hasMultipleColumns,
+      version: context.previewDelimiterVersion
+    });
+    const model = getTablePreviewModel(document, parsed);
+    context.previewModels.set(uri, model);
+    panel.webview.html = buildTablePreviewHtml(document, parsed, model);
+    return true;
+  } catch (error) {
+    postPreviewRefreshError(context, uri, error);
+    return false;
+  }
 }
 
 async function showTablePreview(context, resource) {
-  let document;
+  const activeDocument = vscode.window.activeTextEditor?.document;
+  const sourceUri = resource || activeDocument?.uri;
+  if (!sourceUri) return;
+  const uri = sourceUri.toString();
+  const fileExtension = path.extname(sourceUri.fsPath || sourceUri.path || '').toLowerCase();
+  const fileName = path.basename(sourceUri.fsPath || sourceUri.path || '') || 'CSV Table';
+  let document = activeDocument?.uri.toString() === uri ? activeDocument : undefined;
+  let largeModel;
+  let parsed;
+  let previewModel;
+  const sourceLanguageId = document && LANGUAGE_IDS.has(document.languageId)
+    ? document.languageId
+    : (fileExtension === '.txt' || (context.enabledDocuments.has(uri) && !FILE_EXTENSIONS.has(fileExtension))
+      ? 'plaintext'
+      : largeCsvLanguageId(fileExtension));
   try {
-    document = resource ? await vscode.workspace.openTextDocument(resource) : vscode.window.activeTextEditor?.document;
+    let fileSize = 0;
+    if (sourceUri.scheme === 'file') fileSize = (await fs.promises.stat(sourceUri.fsPath)).size;
+    const isLargeFile = sourceUri.scheme === 'file' && fileSize > LARGE_FILE_PREVIEW_THRESHOLD;
+    if (isLargeFile) {
+      const largeDocument = { uri: sourceUri, languageId: sourceLanguageId };
+      const hasExplicitDelimiter = configuredDelimiter(largeDocument, context) !== 'auto';
+      if (!FILE_EXTENSIONS.has(fileExtension)
+        && !TEXT_EXTENSIONS.has(fileExtension)
+        && !context.enabledDocuments.has(uri)
+        && !(document && LANGUAGE_IDS.has(document.languageId))
+        && !hasExplicitDelimiter) {
+        vscode.window.showWarningMessage('AnyaCSV could not identify this file as delimited data. Use “AnyaCSV: Enable for Current File” first.');
+        return;
+      }
+      largeModel = await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: `Reading ${fileName} for AnyaCSV preview`,
+        cancellable: false
+      }, progress => {
+        let reportedBytes = 0;
+        return buildLargeCsvTablePreview(sourceUri, context, sourceLanguageId, (read, total) => {
+          const increment = total ? 100 * (read - reportedBytes) / total : 0;
+          reportedBytes = read;
+          progress.report({ increment, message: total ? `${Math.min(100, Math.round(100 * read / total))}%` : undefined });
+        });
+      });
+      context.largePreviewModels.set(uri, largeModel);
+      context.previewModels.delete(uri);
+      context.previewDelimiters.set(uri, {
+        delimiter: largeModel.delimiter,
+        autoDetected: largeModel.autoDetected,
+        recognized: largeModel.hasMultipleColumns,
+        version: context.previewDelimiterVersion
+      });
+      context.previewSourceUris.set(uri, sourceUri);
+    } else {
+      if (!document) {
+        document = resource ? await vscode.workspace.openTextDocument(resource) : activeDocument;
+      }
+      if (!document) return;
+      if (!isCsvDocument(document, context)) {
+        vscode.window.showWarningMessage('AnyaCSV could not identify this file as delimited data. Use “AnyaCSV: Enable for Current File” first.');
+        return;
+      }
+      parsed = getParsed(document, context);
+      context.largePreviewModels.delete(uri);
+      previewModel = getTablePreviewModel(document, parsed);
+      context.previewModels.set(uri, previewModel);
+      context.previewDelimiters.set(uri, {
+        delimiter: parsed.delimiter,
+        autoDetected: parsed.autoDetected,
+        recognized: parsed.rows.some(row => row.cells.length > 1),
+        version: context.previewDelimiterVersion
+      });
+      context.previewSourceUris.set(uri, sourceUri);
+    }
   } catch (error) {
     vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
     return;
   }
-  if (!document) return;
-  if (!isCsvDocument(document, context)) {
-    vscode.window.showWarningMessage('AnyaCSV could not identify this file as delimited data. Use “AnyaCSV: Enable for Current File” first.');
-    return;
-  }
 
-  const uri = document.uri.toString();
   let panel = context.previewPanels.get(uri);
   if (!panel) {
     panel = vscode.window.createWebviewPanel(
@@ -1090,26 +1623,79 @@ async function showTablePreview(context, resource) {
       }
       if (message?.type === 'export') {
         const sourceDocument = vscode.workspace.textDocuments.find(item => item.uri.toString() === uri);
-        if (!sourceDocument) {
+        const model = context.largePreviewModels.get(uri)
+          || context.previewModels.get(uri)
+          || (sourceDocument ? getTablePreviewModel(sourceDocument, getParsed(sourceDocument, context)) : undefined);
+        const exportUri = context.previewSourceUris.get(uri) || sourceDocument?.uri;
+        if (!model || !exportUri) {
           void vscode.window.showErrorMessage('The source document is no longer open.');
           return;
         }
+        if (model.isPartial) return;
         try {
-          const model = getTablePreviewModel(sourceDocument, getParsed(sourceDocument, context));
-          void exportTablePreviewForExcel(sourceDocument, model, message)
+          void exportTablePreviewForExcel(exportUri, model, message)
             .catch(error => vscode.window.showErrorMessage(`Could not export Excel workbook: ${error instanceof Error ? error.message : String(error)}`));
         } catch (error) {
           void vscode.window.showErrorMessage(`Could not export Excel workbook: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
       if (message?.type === 'refresh') {
+        const largeSourceUri = context.previewSourceUris.get(uri);
+        if (context.largePreviewModels.has(uri) && largeSourceUri) {
+          const previousDelimiter = context.previewDelimiters.get(uri);
+          const canReuseDelimiter = !message.redetect
+            && previousDelimiter
+            && previousDelimiter.version === context.previewDelimiterVersion;
+          const largeDocument = { uri: largeSourceUri, languageId: sourceLanguageId };
+          const canAutoDetect = configuredDelimiter(largeDocument, context) === 'auto'
+            && vscode.workspace.getConfiguration('anyacsv', largeSourceUri).get('autoDetect', true);
+          void vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: `Refreshing ${fileName} AnyaCSV preview`,
+            cancellable: false
+          }, progress => {
+            const build = (options, progressWeight) => {
+              let reportedBytes = 0;
+              return buildLargeCsvTablePreview(largeSourceUri, context, sourceLanguageId, (read, total) => {
+                const increment = total ? progressWeight * (read - reportedBytes) / total : 0;
+                reportedBytes = read;
+                progress.report({ increment, message: total ? `${Math.min(100, Math.round(100 * read / total))}%` : undefined });
+              }, options);
+            };
+            const firstOptions = canReuseDelimiter
+              ? { delimiter: previousDelimiter.delimiter, autoDetected: previousDelimiter.autoDetected }
+              : {};
+            return build(firstOptions, canReuseDelimiter ? 50 : 100).then(async firstResult => {
+              if (canReuseDelimiter
+                && previousDelimiter.recognized
+                && !firstResult.hasMultipleColumns
+                && canAutoDetect) {
+                progress.report({ message: 'Cached delimiter no longer fits; re-detecting…' });
+                return build({}, 50);
+              }
+              if (canReuseDelimiter) progress.report({ increment: 50 });
+              return firstResult;
+            });
+          }).then(refreshed => {
+            if (previousDelimiter?.recognized && !refreshed.hasMultipleColumns) {
+              throw new Error('The source is no longer recognized as delimited data.');
+            }
+            context.largePreviewModels.set(uri, refreshed);
+            context.previewDelimiters.set(uri, {
+              delimiter: refreshed.delimiter,
+              autoDetected: refreshed.autoDetected,
+              recognized: refreshed.hasMultipleColumns,
+              version: context.previewDelimiterVersion
+            });
+            panel.webview.html = buildTablePreviewHtml({ uri: largeSourceUri }, { delimiter: refreshed.delimiter }, refreshed);
+          }).catch(error => postPreviewRefreshError(context, uri, error));
+          return;
+        }
         const sourceDocument = vscode.workspace.textDocuments.find(item => item.uri.toString() === uri);
-        try {
-          if (!sourceDocument || !refreshTablePreview(sourceDocument, context)) {
-            throw new Error('The source is no longer recognized as delimited data.');
-          }
-        } catch (error) {
-          void panel.webview.postMessage({ type: 'refreshError', message: error instanceof Error ? error.message : String(error) });
+        if (!sourceDocument) {
+          postPreviewRefreshError(context, uri, new Error('The source document is no longer open.'));
+        } else {
+          refreshTablePreview(sourceDocument, context, { redetect: Boolean(message.redetect) });
         }
       }
     });
@@ -1117,11 +1703,22 @@ async function showTablePreview(context, resource) {
     context.hostSubscriptions.push(panel.onDidDispose(() => {
       messageListener.dispose();
       context.previewPanels.delete(uri);
+      context.largePreviewModels.delete(uri);
+      context.previewModels.delete(uri);
+      context.previewDelimiters.delete(uri);
+      context.previewSourceUris.delete(uri);
       context.previewWindowModes.delete(uri);
     }));
   }
-  panel.title = `AnyaCSV: ${path.basename(document.uri.fsPath) || 'CSV Table'}`;
-  panel.webview.html = buildTablePreviewHtml(document, getParsed(document, context));
+  panel.title = `AnyaCSV: ${fileName}`;
+  if (largeModel) {
+    panel.webview.html = buildTablePreviewHtml({ uri: sourceUri }, { delimiter: largeModel.delimiter }, largeModel);
+  } else if (document) {
+    const initialParsed = parsed || getParsed(document, context);
+    previewModel ||= getTablePreviewModel(document, initialParsed);
+    context.previewModels.set(uri, previewModel);
+    panel.webview.html = buildTablePreviewHtml(document, initialParsed, previewModel);
+  }
   panel.reveal(vscode.ViewColumn.Beside);
 }
 
@@ -1139,6 +1736,7 @@ async function applyDocumentDelimiter(document, delimiter, extensionContext, hos
   extensionContext.enabledDocuments.add(uri);
   await hostContext.globalState.update('enabledDocuments', [...extensionContext.enabledDocuments]);
   await extensionContext.workspaceState.update(`delimiter:${uri}`, normalized);
+  extensionContext.previewDelimiterVersion += 1;
   extensionContext.parseCache.delete(uri);
   refreshDocument(document, extensionContext);
   refreshTablePreview(document, extensionContext);
@@ -1186,8 +1784,14 @@ function activate(context) {
     parseCache: new Map(),
     timers: new Map(),
     previewPanels: new Map(),
+    largePreviewModels: new Map(),
+    previewModels: new Map(),
+    previewDelimiters: new Map(),
+    previewDelimiterVersion: 0,
+    previewSourceUris: new Map(),
     previewWindowModes: new Map(),
     lastLanguageByUri: new Map(),
+    decorationStartTimes: new Map(),
     workspaceState: context.workspaceState
   };
   statusBar.command = 'anyacsv.showLint';
@@ -1257,17 +1861,22 @@ function activate(context) {
     extensionContext.enabledDocuments.add(document.uri.toString());
     await context.globalState.update('enabledDocuments', [...extensionContext.enabledDocuments]);
     await extensionContext.workspaceState.update(`delimiter:${document.uri.toString()}`, 'auto');
+    extensionContext.previewDelimiterVersion += 1;
     extensionContext.parseCache.delete(document.uri.toString());
     refreshDocument(document, extensionContext);
     refreshTablePreview(document, extensionContext);
     updateDecorations(vscode.window.activeTextEditor, extensionContext);
   }));
 
-  context.subscriptions.push(vscode.commands.registerCommand('anyacsv.showLint', () => showLint(extensionContext)));
+  context.subscriptions.push(vscode.commands.registerCommand('anyacsv.showLint', resource => showLint(extensionContext, resource)));
   context.subscriptions.push(vscode.commands.registerCommand('anyacsv.previewTable', resource => showTablePreview(extensionContext, resource)));
   context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(document => {
     observeLanguage(document, extensionContext, context);
+    if (vscode.window.visibleTextEditors.some(editor => editor.document.uri.toString() === document.uri.toString())) {
+      markDecorationStart(document, extensionContext);
+    }
     refreshDocument(document, extensionContext);
+    updateVisibleDecorations(document, extensionContext);
   }));
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
     const uri = event.document.uri.toString();
@@ -1276,8 +1885,8 @@ function activate(context) {
     extensionContext.timers.set(uri, setTimeout(() => {
       extensionContext.parseCache.delete(uri);
       refreshDocument(event.document, extensionContext);
-      refreshTablePreview(event.document, extensionContext);
-      updateDecorations(vscode.window.activeTextEditor, extensionContext);
+      if (!extensionContext.largePreviewModels.has(uri)) refreshTablePreview(event.document, extensionContext);
+      updateVisibleDecorations(event.document, extensionContext);
     }, 150));
   }));
   context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(document => {
@@ -1289,18 +1898,20 @@ function activate(context) {
   }));
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
     if (event.affectsConfiguration('anyacsv')) {
+      extensionContext.previewDelimiterVersion += 1;
       extensionContext.parseCache.clear();
       vscode.workspace.textDocuments.forEach(document => {
         refreshDocument(document, extensionContext);
-        refreshTablePreview(document, extensionContext);
+        if (!extensionContext.largePreviewModels.has(document.uri.toString())) refreshTablePreview(document, extensionContext);
       });
-      updateDecorations(vscode.window.activeTextEditor, extensionContext);
+      vscode.window.visibleTextEditors.forEach(editor => updateDecorations(editor, extensionContext));
       updateStatus(extensionContext);
     }
   }));
   context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(editor => {
     if (editor) {
       observeLanguage(editor.document, extensionContext, context);
+      markDecorationStart(editor.document, extensionContext);
       refreshDocument(editor.document, extensionContext);
     } else {
       vscode.commands.executeCommand('setContext', 'anyacsv.isDelimited', false);
@@ -1309,14 +1920,39 @@ function activate(context) {
     updateStatus(extensionContext);
   }));
 
-  vscode.workspace.textDocuments.forEach(document => {
-    observeLanguage(document, extensionContext, context);
-    refreshDocument(document, extensionContext);
+  context.subscriptions.push(vscode.window.onDidChangeTextEditorVisibleRanges(event => {
+    updateDecorations(event.textEditor, extensionContext);
+  }));
+
+  const activeEditor = vscode.window.activeTextEditor;
+  const initializedDocuments = new Set();
+  if (activeEditor) {
+    observeLanguage(activeEditor.document, extensionContext, context);
+    markDecorationStart(activeEditor.document, extensionContext);
+    refreshDocument(activeEditor.document, extensionContext);
+    updateDecorations(activeEditor, extensionContext);
+    initializedDocuments.add(activeEditor.document.uri.toString());
+  }
+  vscode.window.visibleTextEditors.forEach(editor => {
+    const uri = editor.document.uri.toString();
+    if (initializedDocuments.has(uri)) return;
+    observeLanguage(editor.document, extensionContext, context);
+    refreshDocument(editor.document, extensionContext);
+    updateDecorations(editor, extensionContext);
+    initializedDocuments.add(uri);
   });
-  updateDecorations(vscode.window.activeTextEditor, extensionContext);
+  setTimeout(() => {
+    vscode.workspace.textDocuments.forEach(document => {
+      const uri = document.uri.toString();
+      if (initializedDocuments.has(uri)) return;
+      observeLanguage(document, extensionContext, context);
+      refreshDocument(document, extensionContext);
+      initializedDocuments.add(uri);
+    });
+  }, 0);
   updateStatus(extensionContext);
 }
 
 function deactivate() {}
 
-module.exports = { activate, deactivate, parseDelimited, detectDelimiter, findCell, getFilteredTablePreviewRows };
+module.exports = { activate, deactivate, parseDelimited, detectDelimiter, findCell, getFilteredTablePreviewRows, buildLargeCsvTablePreview, refreshTablePreview, updateDecorations };

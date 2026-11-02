@@ -9,9 +9,14 @@ AnyaCSV brings delimiter-aware editing to VS Code for CSV and other delimited te
 - Detects common and configured separators in dynamic mode. Switching an open document to **dynamic csv** prompts for its separator. Use **AnyaCSV: Set Delimiter** to enter any single character or string, or select separator text and run **AnyaCSV: Set Separator from Selection**.
 - Parses escaped double quotes and quoted fields that span lines.
 - Colors columns consistently using an 18-color palette supplied by the active VS Code theme, so long rows have more distinct colors and theme changes are respected.
+- Applies column colors to visible rows when a delimited file opens, then updates them as you scroll.
 - Hover over a value to see its column number, header name when available, row, and separator.
 - Lints malformed quoting and rows with a different number of columns. Click the **CSV** status item at the bottom to review issues.
 - Open **AnyaCSV: Preview as Table** from the Command Palette or editor title bar, or right-click a CSV or `.txt` file and choose **Preview as Table**. For `.txt`, AnyaCSV must detect a consistent delimiter (or you can set one). The preview opens a side-by-side table with global and per-column filters, adjustable page size, row numbers, and pop-out. Use the exact-filter icon beside **Export** to switch between substring and exact-value matching. The green **Export** button saves all rows matching the current filters as a real Excel workbook (`.xlsx`); it exports the full filtered result, not only the visible page. Values are stored as text so Excel keeps identifiers, dates, and formula-like strings as shown, and the source file is unchanged. The preview refreshes when the source file or AnyaCSV settings change.
+
+  Refresh reuses the delimiter that was working for the preview session. If the source no longer looks delimited, AnyaCSV keeps the last good table visible and shows a warning with a **Retry / re-detect delimiter** action.
+
+  Files larger than 50 MB are streamed from disk for preview and lint, so they do not need to be opened as editor documents. Large-file previews load at most 10,000 rows. Filtering applies to the loaded rows, and Excel export is disabled when the preview is partial. Large-file lint reports issue locations in a message instead of the Problems panel. Save the file before refreshing the preview.
 
 Choose a mode from VS Code's language selector in the bottom-right corner:
 
