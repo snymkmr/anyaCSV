@@ -10,6 +10,9 @@ const { createDeflateRaw } = require('node:zlib');
 const FILE_EXTENSIONS = new Set(['.csv', '.tsv', '.psv', '.ssv', '.dsv', '.tab']);
 const TEXT_EXTENSIONS = new Set(['.txt']);
 const LANGUAGE_IDS = new Set(['csv', 'tsv', 'csv (semicolon)', 'csv (whitespace)', 'csv (pipe)', 'dynamic csv']);
+const GRAMMAR_LANGUAGE_IDS = new Set(['csv', 'tsv', 'csv (semicolon)', 'csv (whitespace)', 'csv (pipe)']);
+const COLUMN_TOKEN_TYPES = Array.from({ length: 10 }, (_, index) => `anyacsvColumn${index + 1}`);
+const DYNAMIC_CSV_HIGHLIGHT_MARGIN = 50;
 const DELIMITER_CANDIDATES = [',', '\t', ';', '|', ':', '\x1f', 'whitespace'];
 const COLOR_IDS = [
   'charts.red',
@@ -587,6 +590,104 @@ function getParsed(document, context, options = {}) {
   return result;
 }
 
+function getSemanticTokenParseSettings(document, context) {
+  const config = vscode.workspace.getConfiguration('anyacsv', document.uri);
+  const quoteCharacter = config.get('quoteCharacter', '"');
+  const requested = configuredDelimiter(document, context);
+  if (requested && requested !== 'auto') return { delimiter: requested, quoteCharacter };
+
+  const autoDetect = config.get('autoDetect', true);
+  const sampleRows = config.get('autoDetectSampleRows', 20);
+  const configuredSeparators = config.get('autoDetectSeparators', []);
+  const additionalSeparators = Array.isArray(configuredSeparators)
+    ? configuredSeparators
+      .filter(item => typeof item === 'string' && item.length > 0 && !/[\r\n]/.test(item))
+      .map(item => item === '\\t' ? '\t' : item)
+    : [];
+  const cached = context.parseCache.get(document.uri.toString());
+  if (cached
+    && cached.version === document.version
+    && cached.requested === requested
+    && cached.quoteCharacter === quoteCharacter
+    && cached.autoDetect === autoDetect
+    && cached.sampleRows === sampleRows
+    && cached.additionalSeparatorsKey === JSON.stringify(additionalSeparators)) {
+    return { delimiter: cached.delimiter, quoteCharacter };
+  }
+
+  const detectionSample = autoDetect
+    ? document.getText(new vscode.Range(
+      new vscode.Position(0, 0),
+      document.positionAt(65536)
+    ))
+    : '';
+  const autoDetectedDelimiter = autoDetect
+    ? detectDelimiter(detectionSample, quoteCharacter, sampleRows, 2, additionalSeparators)
+    : undefined;
+  return { delimiter: autoDetectedDelimiter || ',', quoteCharacter };
+}
+
+function provideDynamicCsvSemanticTokens(document, range, context, legend) {
+  if (document.languageId !== 'dynamic csv') return null;
+
+  const { delimiter, quoteCharacter } = getSemanticTokenParseSettings(document, context);
+  const startLine = Math.max(0, range.start.line - DYNAMIC_CSV_HIGHLIGHT_MARGIN);
+  const endLine = Math.min(document.lineCount - 1, range.end.line + DYNAMIC_CSV_HIGHLIGHT_MARGIN);
+  if (endLine < startLine) return new vscode.SemanticTokensBuilder(legend).build();
+
+  const lastLine = document.lineAt(endLine);
+  const text = document.getText(new vscode.Range(
+    new vscode.Position(startLine, 0),
+    new vscode.Position(endLine, lastLine.text.length)
+  ));
+  const parsed = parseDelimited(text, delimiter, quoteCharacter);
+  const lineOffsets = [];
+  let offset = 0;
+  for (let line = startLine; line <= endLine; line += 1) {
+    const lineText = document.lineAt(line).text;
+    lineOffsets.push({ start: offset, end: offset + lineText.length });
+    offset += lineText.length;
+    if (line < endLine) {
+      const nextStart = document.offsetAt(new vscode.Position(line + 1, 0));
+      const currentStart = document.offsetAt(new vscode.Position(line, 0));
+      offset += nextStart - currentStart - lineText.length;
+    }
+  }
+
+  const builder = new vscode.SemanticTokensBuilder(legend);
+  for (const row of parsed.rows) {
+    for (let column = 1; column < row.cells.length; column += 1) {
+      const cell = row.cells[column];
+      const firstCellLine = Math.max(0, findLineOffsetIndex(lineOffsets, cell.start));
+      const lastCellLine = Math.max(firstCellLine, findLineOffsetIndex(lineOffsets, Math.max(cell.start, cell.end - 1)));
+      for (let lineIndex = firstCellLine; lineIndex <= lastCellLine && lineIndex < lineOffsets.length; lineIndex += 1) {
+        const lineOffset = lineOffsets[lineIndex];
+        const tokenStart = Math.max(cell.start, lineOffset.start);
+        const tokenEnd = Math.min(cell.end, lineOffset.end);
+        if (tokenEnd <= tokenStart) continue;
+        const startCharacter = tokenStart - lineOffset.start;
+        const endCharacter = tokenEnd - lineOffset.start;
+        builder.push(
+          new vscode.Range(startLine + lineIndex, startCharacter, startLine + lineIndex, endCharacter),
+          COLUMN_TOKEN_TYPES[column % COLUMN_TOKEN_TYPES.length]
+        );
+      }
+    }
+  }
+  return builder.build();
+}
+
+function findLineOffsetIndex(lineOffsets, offset) {
+  let low = 0;
+  let high = lineOffsets.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (lineOffsets[middle].end <= offset) low = middle + 1;
+    else high = middle;
+  }
+  return Math.min(low, lineOffsets.length - 1);
+}
+
 function lintDocument(document, parsed, context) {
   const config = vscode.workspace.getConfiguration('anyacsv', document.uri);
   const headerRow = config.get('headerRow', 1);
@@ -711,13 +812,27 @@ function formatStatusBarIssue(message) {
   return normalized.length > 80 ? `${normalized.slice(0, 79)}…` : normalized;
 }
 
+function clearEditorDecorations(editor, context) {
+  context.clearedDecorationEditors ||= new WeakSet();
+  if (context.clearedDecorationEditors.has(editor)) return;
+  for (const decoration of context.decorations) editor.setDecorations(decoration, []);
+  context.clearedDecorationEditors.add(editor);
+}
+
 function updateDecorations(editor, context) {
   if (!editor || !isCsvDocument(editor.document, context)) {
-    for (const decoration of context.decorations) editor?.setDecorations(decoration, []);
-    if (editor) context.decorationStartTimes?.delete(editor.document.uri.toString());
+    if (editor) {
+      clearEditorDecorations(editor, context);
+      context.decorationStartTimes?.delete(editor.document.uri.toString());
+    }
     return;
   }
   const document = editor.document;
+  if (GRAMMAR_LANGUAGE_IDS.has(document.languageId) || document.languageId === 'dynamic csv') {
+    clearEditorDecorations(editor, context);
+    context.decorationStartTimes?.delete(document.uri.toString());
+    return;
+  }
   const parsed = getParsed(document, context);
   const visibleRanges = editor.visibleRanges
     .map(range => ({ start: document.offsetAt(range.start), end: document.offsetAt(range.end) }))
@@ -758,6 +873,7 @@ function updateDecorations(editor, context) {
     if (count >= 50000) break;
   }
   context.decorations.forEach((decoration, index) => editor.setDecorations(decoration, ranges[index]));
+  context.clearedDecorationEditors?.delete(editor);
   const uri = document.uri.toString();
   const startedAt = context.decorationStartTimes?.get(uri);
   if (startedAt !== undefined) {
@@ -1739,6 +1855,7 @@ async function applyDocumentDelimiter(document, delimiter, extensionContext, hos
   extensionContext.previewDelimiterVersion += 1;
   extensionContext.parseCache.delete(uri);
   refreshDocument(document, extensionContext);
+  extensionContext.semanticTokensChangeEmitter.fire();
   refreshTablePreview(document, extensionContext);
   updateDecorations(vscode.window.activeTextEditor, extensionContext);
   updateStatus(extensionContext);
@@ -1771,6 +1888,8 @@ function observeLanguage(document, extensionContext, hostContext) {
 function activate(context) {
   const diagnostics = vscode.languages.createDiagnosticCollection('anyacsv');
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20);
+  const semanticTokensChangeEmitter = new vscode.EventEmitter();
+  const semanticTokensLegend = new vscode.SemanticTokensLegend(COLUMN_TOKEN_TYPES);
   const decorations = COLOR_IDS.map(color => vscode.window.createTextEditorDecorationType({
     color: new vscode.ThemeColor(color),
     rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
@@ -1778,6 +1897,8 @@ function activate(context) {
   const extensionContext = {
     diagnostics,
     statusBar,
+    semanticTokensChangeEmitter,
+    clearedDecorationEditors: new WeakSet(),
     decorations,
     hostSubscriptions: context.subscriptions,
     enabledDocuments: new Set(context.globalState.get('enabledDocuments', [])),
@@ -1795,7 +1916,14 @@ function activate(context) {
     workspaceState: context.workspaceState
   };
   statusBar.command = 'anyacsv.showLint';
-  context.subscriptions.push(diagnostics, statusBar, ...decorations);
+  context.subscriptions.push(diagnostics, statusBar, semanticTokensChangeEmitter, ...decorations);
+
+  context.subscriptions.push(vscode.languages.registerDocumentRangeSemanticTokensProvider('dynamic csv', {
+    onDidChangeSemanticTokens: semanticTokensChangeEmitter.event,
+    provideDocumentRangeSemanticTokens(document, range) {
+      return provideDynamicCsvSemanticTokens(document, range, extensionContext, semanticTokensLegend);
+    }
+  }, semanticTokensLegend));
 
   context.subscriptions.push(vscode.languages.registerHoverProvider({ scheme: '*' }, {
     provideHover(document, position) {
@@ -1864,6 +1992,7 @@ function activate(context) {
     extensionContext.previewDelimiterVersion += 1;
     extensionContext.parseCache.delete(document.uri.toString());
     refreshDocument(document, extensionContext);
+    extensionContext.semanticTokensChangeEmitter.fire();
     refreshTablePreview(document, extensionContext);
     updateDecorations(vscode.window.activeTextEditor, extensionContext);
   }));
@@ -1904,6 +2033,7 @@ function activate(context) {
         refreshDocument(document, extensionContext);
         if (!extensionContext.largePreviewModels.has(document.uri.toString())) refreshTablePreview(document, extensionContext);
       });
+      extensionContext.semanticTokensChangeEmitter.fire();
       vscode.window.visibleTextEditors.forEach(editor => updateDecorations(editor, extensionContext));
       updateStatus(extensionContext);
     }
@@ -1955,4 +2085,4 @@ function activate(context) {
 
 function deactivate() {}
 
-module.exports = { activate, deactivate, parseDelimited, detectDelimiter, findCell, getFilteredTablePreviewRows, buildLargeCsvTablePreview, refreshTablePreview, updateDecorations };
+module.exports = { activate, deactivate, parseDelimited, detectDelimiter, findCell, getFilteredTablePreviewRows, buildLargeCsvTablePreview, refreshTablePreview, updateDecorations, provideDynamicCsvSemanticTokens };

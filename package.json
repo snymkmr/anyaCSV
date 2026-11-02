@@ -3,7 +3,7 @@
   "displayName": "AnyaCSV",
   "icon": "assets/CSV-icon-256.png",
   "description": "Detect, preview, and lint CSV and other delimited files.",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "publisher": "Sanyam",
   "repository": {
     "type": "git",
@@ -82,6 +82,56 @@
           ".ssv",
           ".dsv"
         ]
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "dynamic csv",
+        "scopes": {
+          "anyacsvColumn1": ["anyacsvColumn1"],
+          "anyacsvColumn2": ["keyword.anyacsvColumn2"],
+          "anyacsvColumn3": ["entity.name.function.anyacsvColumn3"],
+          "anyacsvColumn4": ["comment.anyacsvColumn4"],
+          "anyacsvColumn5": ["string.anyacsvColumn5"],
+          "anyacsvColumn6": ["variable.parameter.anyacsvColumn6"],
+          "anyacsvColumn7": ["constant.numeric.anyacsvColumn7"],
+          "anyacsvColumn8": ["entity.name.type.anyacsvColumn8"],
+          "anyacsvColumn9": ["markup.bold.anyacsvColumn9"],
+          "anyacsvColumn10": ["invalid.anyacsvColumn10"],
+          "comment": ["comment"]
+        }
+      }
+    ],
+    "configurationDefaults": {
+      "[dynamic csv][csv][tsv][csv (semicolon)][csv (pipe)][csv (whitespace)]": {
+        "editor.semanticHighlighting.enabled": true
+      }
+    },
+    "grammars": [
+      {
+        "language": "csv",
+        "scopeName": "source.anyacsv.csv",
+        "path": "./syntaxes/csv.tmLanguage.json"
+      },
+      {
+        "language": "tsv",
+        "scopeName": "source.anyacsv.tsv",
+        "path": "./syntaxes/tsv.tmLanguage.json"
+      },
+      {
+        "language": "csv (semicolon)",
+        "scopeName": "source.anyacsv.semicolon",
+        "path": "./syntaxes/semicolon.tmLanguage.json"
+      },
+      {
+        "language": "csv (pipe)",
+        "scopeName": "source.anyacsv.pipe",
+        "path": "./syntaxes/pipe.tmLanguage.json"
+      },
+      {
+        "language": "csv (whitespace)",
+        "scopeName": "source.anyacsv.whitespace",
+        "path": "./syntaxes/whitespace.tmLanguage.json"
       }
     ],
     "commands": [

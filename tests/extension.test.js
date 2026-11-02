@@ -8,9 +8,31 @@ const { test } = require('node:test');
 const originalLoad = Module._load;
 const vscodeMock = {
   Range: class Range {
-    constructor(start, end) {
-      this.start = start;
-      this.end = end;
+    constructor(start, startCharacter, end, endCharacter) {
+      if (typeof start === 'number') {
+        this.start = { line: start, character: startCharacter };
+        this.end = { line: end, character: endCharacter };
+      } else {
+        this.start = start;
+        this.end = startCharacter;
+      }
+    }
+  },
+  Position: class Position {
+    constructor(line, character) {
+      this.line = line;
+      this.character = character;
+    }
+  },
+  SemanticTokensBuilder: class SemanticTokensBuilder {
+    constructor() {
+      this.tokens = [];
+    }
+    push(range, type) {
+      this.tokens.push({ range, type });
+    }
+    build() {
+      return this.tokens;
     }
   },
   workspace: {
@@ -28,7 +50,46 @@ try {
   Module._load = originalLoad;
 }
 
-const { parseDelimited, detectDelimiter, findCell, getFilteredTablePreviewRows, buildLargeCsvTablePreview, refreshTablePreview, updateDecorations } = extension;
+const { parseDelimited, detectDelimiter, findCell, getFilteredTablePreviewRows, buildLargeCsvTablePreview, refreshTablePreview, updateDecorations, provideDynamicCsvSemanticTokens } = extension;
+
+function createTextDocument(text, delimiterOverride) {
+  const lineStarts = [0];
+  const lineTexts = [];
+  const lineBreak = /\r\n|\r|\n/g;
+  let previousEnd = 0;
+  let match;
+  while ((match = lineBreak.exec(text))) {
+    lineTexts.push(text.slice(previousEnd, match.index));
+    previousEnd = match.index + match[0].length;
+    lineStarts.push(previousEnd);
+  }
+  lineTexts.push(text.slice(previousEnd));
+  const uri = { scheme: 'file', fsPath: '/tmp/dynamic.csv', toString: () => 'file:///tmp/dynamic.csv' };
+  const requestedRanges = [];
+  const document = {
+    uri,
+    languageId: 'dynamic csv',
+    version: 1,
+    lineCount: lineTexts.length,
+    lineAt: line => ({ text: lineTexts[line] }),
+    offsetAt: position => lineStarts[position.line] + position.character,
+    positionAt: offset => {
+      let line = lineStarts.length - 1;
+      while (line > 0 && lineStarts[line] > offset) line -= 1;
+      return { line, character: offset - lineStarts[line] };
+    },
+    getText: range => {
+      if (!range) return text;
+      requestedRanges.push(range);
+      return text.slice(document.offsetAt(range.start), document.offsetAt(range.end));
+    }
+  };
+  const context = {
+    workspaceState: { get: () => delimiterOverride },
+    parseCache: new Map()
+  };
+  return { document, context, requestedRanges };
+}
 
 function createPreviewFixture(source) {
   let text = source;
@@ -227,20 +288,11 @@ test('keeps the last preview on recognition failure and lets the user re-detect'
   assert.match(fixture.html, /redetect: true/);
 });
 
-test('creates color decorations only for cells in the visible editor ranges', () => {
-  const text = 'a,b\nc,d\ne,f\n';
-  const lineOffsets = [0, 4, 8];
+test('clears legacy decorations for grammar-colored language modes', () => {
   const document = {
     uri: { scheme: 'file', fsPath: '/tmp/visible.csv', toString: () => 'file:///tmp/visible.csv' },
     languageId: 'csv',
-    version: 1,
-    getText: () => text,
-    offsetAt: position => lineOffsets[position.line] + position.character,
-    positionAt: offset => {
-      let line = lineOffsets.length - 1;
-      while (line > 0 && lineOffsets[line] > offset) line -= 1;
-      return { line, character: offset - lineOffsets[line] };
-    }
+    version: 1
   };
   const context = {
     workspaceState: { get: () => undefined },
@@ -249,15 +301,52 @@ test('creates color decorations only for cells in the visible editor ranges', ()
     decorations: Array.from({ length: 18 }, () => ({}))
   };
   const applied = new Map();
+  let decorationCalls = 0;
   const editor = {
     document,
     visibleRanges: [{ start: { line: 1, character: 0 }, end: { line: 2, character: 3 } }],
-    setDecorations: (decoration, ranges) => applied.set(decoration, ranges)
+    setDecorations: (decoration, ranges) => {
+      decorationCalls += 1;
+      applied.set(decoration, ranges);
+    }
   };
 
   updateDecorations(editor, context);
+  updateDecorations(editor, context);
 
-  assert.deepEqual(applied.get(context.decorations[0]).map(range => range.start.line), [1, 2]);
-  assert.deepEqual(applied.get(context.decorations[1]).map(range => range.start.line), [1, 2]);
-  assert.equal(applied.get(context.decorations[0]).some(range => range.start.line === 0), false);
+  assert.equal(applied.size, context.decorations.length);
+  assert.equal(decorationCalls, context.decorations.length);
+  for (const ranges of applied.values()) assert.deepEqual(ranges, []);
+});
+
+test('emits range semantic tokens per line for custom-delimited multiline fields', () => {
+  const lines = Array.from({ length: 120 }, () => 'first;second;third');
+  lines[60] = 'first;"multi';
+  lines[61] = 'line';
+  lines[62] = 'field";last';
+  const fixture = createTextDocument(lines.join('\n'), ';');
+
+  const tokens = provideDynamicCsvSemanticTokens(
+    fixture.document,
+    { start: { line: 61, character: 0 }, end: { line: 61, character: 4 } },
+    fixture.context,
+    {}
+  );
+
+  assert.equal(fixture.requestedRanges.length, 1);
+  assert.equal(fixture.requestedRanges[0].start.line, 11);
+  assert.equal(fixture.requestedRanges[0].end.line, 111);
+  assert.deepEqual(tokens
+    .filter(token => token.range.start.line >= 60 && token.range.start.line <= 62)
+    .map(token => [
+      token.range.start.line,
+      token.range.start.character,
+      token.range.end.character,
+      token.type
+    ]), [
+    [60, 6, 12, 'anyacsvColumn2'],
+    [61, 0, 4, 'anyacsvColumn2'],
+    [62, 0, 6, 'anyacsvColumn2'],
+    [62, 7, 11, 'anyacsvColumn3']
+  ]);
 });

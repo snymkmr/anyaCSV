@@ -1,0 +1,43 @@
+{
+  "name": "AnyaCSV TSV",
+  "scopeName": "source.anyacsv.tsv",
+  "fileTypes": [],
+  "patterns": [
+    {
+      "match": "((?:[^\\t]*(?:\\t|$)))((?:[^\\t]*(?:\\t|$)))((?:[^\\t]*(?:\\t|$)))((?:[^\\t]*(?:\\t|$)))((?:[^\\t]*(?:\\t|$)))((?:[^\\t]*(?:\\t|$)))((?:[^\\t]*(?:\\t|$)))((?:[^\\t]*(?:\\t|$)))((?:[^\\t]*(?:\\t|$)))((?:[^\\t]*(?:\\t|$)))",
+      "name": "anyacsv.columns",
+      "captures": {
+        "1": {
+          "name": "anyacsvColumn1"
+        },
+        "2": {
+          "name": "keyword.anyacsvColumn2"
+        },
+        "3": {
+          "name": "entity.name.function.anyacsvColumn3"
+        },
+        "4": {
+          "name": "comment.anyacsvColumn4"
+        },
+        "5": {
+          "name": "string.anyacsvColumn5"
+        },
+        "6": {
+          "name": "variable.parameter.anyacsvColumn6"
+        },
+        "7": {
+          "name": "constant.numeric.anyacsvColumn7"
+        },
+        "8": {
+          "name": "entity.name.type.anyacsvColumn8"
+        },
+        "9": {
+          "name": "markup.bold.anyacsvColumn9"
+        },
+        "10": {
+          "name": "invalid.anyacsvColumn10"
+        }
+      }
+    }
+  ]
+}

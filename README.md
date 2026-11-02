@@ -8,8 +8,8 @@ AnyaCSV brings delimiter-aware editing to VS Code for CSV and other delimited te
 - Supports comma, tab, semicolon, whitespace, pipe, and dynamic separators. Commas, tabs, semicolons, and pipes inside double-quoted fields are treated as data. Whitespace mode merges consecutive whitespace separators.
 - Detects common and configured separators in dynamic mode. Switching an open document to **dynamic csv** prompts for its separator. Use **AnyaCSV: Set Delimiter** to enter any single character or string, or select separator text and run **AnyaCSV: Set Separator from Selection**.
 - Parses escaped double quotes and quoted fields that span lines.
-- Colors columns consistently using an 18-color palette supplied by the active VS Code theme, so long rows have more distinct colors and theme changes are respected.
-- Applies column colors to visible rows when a delimited file opens, then updates them as you scroll.
+- Colors the five fixed-delimiter modes with native TextMate grammars and cycles through ten theme-aware column colors. Dynamic CSV uses range semantic tokens and handles multiline quoted fields.
+- Recolors with the active VS Code theme. Fixed-mode grammar coloring is viewport-first and incremental, including when you scroll.
 - Hover over a value to see its column number, header name when available, row, and separator.
 - Lints malformed quoting and rows with a different number of columns. Click the **CSV** status item at the bottom to review issues.
 - Open **AnyaCSV: Preview as Table** from the Command Palette or editor title bar, or right-click a CSV or `.txt` file and choose **Preview as Table**. For `.txt`, AnyaCSV must detect a consistent delimiter (or you can set one). The preview opens a side-by-side table with global and per-column filters, adjustable page size, row numbers, and pop-out. Use the exact-filter icon beside **Export** to switch between substring and exact-value matching. The green **Export** button saves all rows matching the current filters as a real Excel workbook (`.xlsx`); it exports the full filtered result, not only the visible page. Values are stored as text so Excel keeps identifiers, dates, and formula-like strings as shown, and the source file is unchanged. The preview refreshes when the source file or AnyaCSV settings change.
@@ -39,6 +39,8 @@ You can assign an extension to a mode in VS Code settings. Use the lowercase lan
   "*.csv": "csv (semicolon)"
 }
 ```
+
+The fixed-mode grammars color a multiline quoted field's continuation lines as new fields. Dynamic CSV handles multiline quoted fields correctly. Other extensions that register grammars for the same language IDs can override AnyaCSV's coloring, so disable one extension's coloring if both are installed.
 
 ## Commands
 
