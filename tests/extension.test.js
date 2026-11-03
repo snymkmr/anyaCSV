@@ -219,8 +219,9 @@ test('lints streamed CSV records and tracks physical lines across quoted newline
   await fs.writeFile(filePath, 'name,value\r\nAlice,1\r\n"Bob\nB",2\r\nBad,3,extra\r\n');
   const uri = { fsPath: filePath, toString: () => `file://${filePath}` };
   const context = { workspaceState: { get: () => undefined }, enabledDocuments: new Set() };
+  const progress = [];
 
-  const model = await buildLargeCsvTablePreview(uri, context, 'csv');
+  const model = await buildLargeCsvTablePreview(uri, context, 'csv', (read, total) => progress.push({ read, total }));
 
   assert.equal(model.sourceTotalRowCount, 3);
   assert.equal(model.lintIssueCount, 1);
@@ -230,6 +231,9 @@ test('lints streamed CSV records and tracks physical lines across quoted newline
     column: 1,
     message: 'Expected 2 columns but found 3.'
   });
+  assert.ok(progress.length > 0);
+  assert.ok(progress.every(({ read, total }, index) => read <= total && (index === 0 || read >= progress[index - 1].read)));
+  assert.equal(progress.at(-1).read, progress.at(-1).total);
 });
 
 test('reports streamed CSV quote errors with line and column', async t => {
