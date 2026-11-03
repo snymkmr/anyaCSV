@@ -172,19 +172,19 @@
       "editor/context": [
         {
           "command": "anyacsv.previewTable",
-          "when": "anyacsv.isDelimited || resourceExtname == .csv || resourceExtname == .tsv || resourceExtname == .tab || resourceExtname == .psv || resourceExtname == .ssv || resourceExtname == .dsv || resourceExtname == .txt",
+          "when": "anyacsv.isDelimited || resourceExtname == .csv || resourceExtname == .tsv || resourceExtname == .tab || resourceExtname == .psv || resourceExtname == .ssv || resourceExtname == .dsv",
           "group": "navigation"
         }
       ],
       "explorer/context": [
         {
           "command": "anyacsv.showLint",
-          "when": "resourceExtname == .csv || resourceExtname == .tsv || resourceExtname == .tab || resourceExtname == .psv || resourceExtname == .ssv || resourceExtname == .dsv || resourceExtname == .txt",
+          "when": "resourceExtname == .csv || resourceExtname == .tsv || resourceExtname == .tab || resourceExtname == .psv || resourceExtname == .ssv || resourceExtname == .dsv",
           "group": "2_workspace@0"
         },
         {
           "command": "anyacsv.previewTable",
-          "when": "resourceExtname == .csv || resourceExtname == .tsv || resourceExtname == .tab || resourceExtname == .psv || resourceExtname == .ssv || resourceExtname == .dsv || resourceExtname == .txt",
+          "when": "resourceExtname == .csv || resourceExtname == .tsv || resourceExtname == .tab || resourceExtname == .psv || resourceExtname == .ssv || resourceExtname == .dsv",
           "group": "2_workspace@1"
         }
       ]
@@ -216,7 +216,7 @@
         "anyacsv.autoDetect": {
           "type": "boolean",
           "default": true,
-          "description": "Detect delimited content in CSV, Plain Text, and .txt files."
+          "description": "Detect delimited content in CSV and Plain Text documents. .txt files require an AnyaCSV language mode or explicit per-file activation."
         },
         "anyacsv.autoDetectSampleRows": {
           "type": "integer",

@@ -12,7 +12,7 @@ AnyaCSV brings delimiter-aware editing to VS Code for CSV and other delimited te
 - Recolors with the active VS Code theme. Fixed-mode grammar coloring is viewport-first and incremental, including when you scroll.
 - Hover over a value to see its column number, header name when available, row, and separator.
 - Lints malformed quoting and rows with a different number of columns. Click the **CSV** status item at the bottom to review issues.
-- Open **AnyaCSV: Preview as Table** from the Command Palette or editor title bar, or right-click a CSV or `.txt` file and choose **Preview as Table**. For `.txt`, AnyaCSV must detect a consistent delimiter (or you can set one). The preview opens a side-by-side table with global and per-column filters, adjustable page size, row numbers, and pop-out. Use the exact-filter icon beside **Export** to switch between substring and exact-value matching. The green **Export** button saves all rows matching the current filters as a real Excel workbook (`.xlsx`); it exports the full filtered result, not only the visible page. Values are stored as text so Excel keeps identifiers, dates, and formula-like strings as shown, and the source file is unchanged. The preview refreshes when the source file or AnyaCSV settings change.
+- Open **AnyaCSV: Preview as Table** from the Command Palette or editor title bar, or right-click a supported delimited file and choose **Preview as Table**. To preview a `.txt` file, first select an AnyaCSV language mode in VS Code's language selector. The preview opens a side-by-side table with global and per-column filters, adjustable page size, row numbers, and pop-out. Use the exact-filter icon beside **Export** to switch between substring and exact-value matching. The green **Export** button saves all rows matching the current filters as a real Excel workbook (`.xlsx`); it exports the full filtered result, not only the visible page. Values are stored as text so Excel keeps identifiers, dates, and formula-like strings as shown, and the source file is unchanged. The preview refreshes when the source file or AnyaCSV settings change.
 
   Refresh reuses the delimiter that was working for the preview session. If the source no longer looks delimited, AnyaCSV keeps the last good table visible and shows a warning with a **Retry / re-detect delimiter** action.
 
@@ -29,7 +29,7 @@ Choose a mode from VS Code's language selector in the bottom-right corner:
 | `csv (pipe)` | Pipe | `.psv` |
 | `dynamic csv` | Auto-detected or custom | `.ssv`, `.dsv` |
 
-With autodetection enabled, AnyaCSV recognizes delimited content in **Plain Text** and `.txt` files. Set `anyacsv.autoDetect` to `false` to disable content detection, or adjust `anyacsv.autoDetectSampleRows` (default `20`) to change how many logical records it inspects. Explicit language modes and custom delimiter settings continue to work when autodetection is off.
+With autodetection enabled, AnyaCSV recognizes delimited content in **Plain Text** documents. A `.txt` file is only treated as delimited when you select an AnyaCSV language mode in the language selector; its extension alone will not trigger CSV detection. You can also use **AnyaCSV: Enable for Current File** as an explicit per-file override. Set `anyacsv.autoDetect` to `false` to disable content detection, or adjust `anyacsv.autoDetectSampleRows` (default `20`) to change how many logical records it inspects. Explicit language modes and custom delimiter settings continue to work when autodetection is off.
 
 You can assign an extension to a mode in VS Code settings. Use the lowercase language IDs shown here:
 
@@ -54,7 +54,7 @@ The fixed-mode grammars color a multiline quoted field's continuation lines as n
 ## Settings
 
 - `anyacsv.delimiter`: `auto` by default. Set a separator such as `;` or `\t`; a configured value overrides the selected language mode.
-- `anyacsv.autoDetect`: detect content in CSV and Plain Text files, default `true`.
+- `anyacsv.autoDetect`: detect content in CSV and Plain Text documents, default `true`. `.txt` files require an AnyaCSV language mode or explicit per-file activation.
 - `anyacsv.autoDetectSampleRows`: logical records to inspect during detection, default `20` (range `1`–`200`).
 - `anyacsv.autoDetectSeparators`: extra separator strings to include in autodetection, for example `["::", "^"]`.
 - `anyacsv.quoteCharacter`: quote character, default `"`.

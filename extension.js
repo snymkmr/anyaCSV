@@ -8,7 +8,6 @@ const { pipeline } = require('node:stream/promises');
 const { createDeflateRaw } = require('node:zlib');
 
 const FILE_EXTENSIONS = new Set(['.csv', '.tsv', '.psv', '.ssv', '.dsv', '.tab']);
-const TEXT_EXTENSIONS = new Set(['.txt']);
 const LANGUAGE_IDS = new Set(['csv', 'tsv', 'csv (semicolon)', 'csv (whitespace)', 'csv (pipe)', 'dynamic csv']);
 const GRAMMAR_LANGUAGE_IDS = new Set(['csv', 'tsv', 'csv (semicolon)', 'csv (whitespace)', 'csv (pipe)']);
 const COLUMN_TOKEN_TYPES = Array.from({ length: 10 }, (_, index) => `anyacsvColumn${index + 1}`);
@@ -60,11 +59,10 @@ function isCsvDocument(document, context) {
   if (context.enabledDocuments.has(document.uri.toString())) return true;
   if (LANGUAGE_IDS.has(document.languageId)) return true;
   if (document.uri.scheme === 'file' && FILE_EXTENSIONS.has(path.extname(document.uri.fsPath).toLowerCase())) return true;
+  if (document.uri.scheme === 'file' && path.extname(document.uri.fsPath).toLowerCase() === '.txt') return false;
   const config = vscode.workspace.getConfiguration('anyacsv', document.uri);
   if (configuredDelimiter(document, context) !== 'auto') return true;
-  const isTextCandidate = document.languageId === 'plaintext'
-    || (document.uri.scheme === 'file' && TEXT_EXTENSIONS.has(path.extname(document.uri.fsPath).toLowerCase()));
-  return isTextCandidate
+  return document.languageId === 'plaintext'
     && config.get('autoDetect', true)
     && getParsed(document, context).autoDetected;
 }
@@ -405,6 +403,12 @@ function largeCsvLanguageId(extension) {
 
 async function buildLargeCsvTablePreview(uri, context, languageId, onProgress, options = {}) {
   const filePath = uri.fsPath;
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === '.txt'
+    && !LANGUAGE_IDS.has(languageId)
+    && !context.enabledDocuments.has(uri.toString())) {
+    throw new Error('Select an AnyaCSV language mode or enable AnyaCSV for this .txt file first.');
+  }
   const stat = await fs.promises.stat(filePath);
   const document = { uri, languageId };
   const config = vscode.workspace.getConfiguration('anyacsv', uri);
@@ -906,16 +910,23 @@ async function showLint(context, resource) {
       const uri = sourceUri.toString();
       const document = vscode.workspace.textDocuments.find(item => item.uri.toString() === uri);
       const extension = path.extname(sourceUri.fsPath).toLowerCase();
-      const languageId = document && LANGUAGE_IDS.has(document.languageId)
+      const languageId = document && (LANGUAGE_IDS.has(document.languageId) || extension === '.txt')
         ? document.languageId
-        : (extension === '.txt' || (context.enabledDocuments.has(uri) && !FILE_EXTENSIONS.has(extension))
+        : (context.enabledDocuments.has(uri) && !FILE_EXTENSIONS.has(extension)
           ? 'plaintext'
           : largeCsvLanguageId(extension));
+      const hasExplicitDelimiter = configuredDelimiter({ uri: sourceUri, languageId }, context) !== 'auto';
+      const isTxtFile = extension === '.txt';
+      const hasExplicitLanguageMode = document && LANGUAGE_IDS.has(document.languageId);
+      if (isTxtFile && !context.enabledDocuments.has(uri) && !hasExplicitLanguageMode) {
+        void vscode.window.showWarningMessage('Select an AnyaCSV language mode or enable AnyaCSV for this .txt file first.');
+        return;
+      }
       if (!FILE_EXTENSIONS.has(extension)
-        && !TEXT_EXTENSIONS.has(extension)
+        && !isTxtFile
         && !context.enabledDocuments.has(uri)
-        && !(document && LANGUAGE_IDS.has(document.languageId))
-        && configuredDelimiter({ uri: sourceUri, languageId }, context) === 'auto') {
+        && !hasExplicitLanguageMode
+        && !hasExplicitDelimiter) {
         void vscode.window.showWarningMessage('AnyaCSV could not identify this file as delimited data. Use “AnyaCSV: Enable for Current File” first.');
         return;
       }
@@ -1640,9 +1651,9 @@ async function showTablePreview(context, resource) {
   let largeModel;
   let parsed;
   let previewModel;
-  const sourceLanguageId = document && LANGUAGE_IDS.has(document.languageId)
+  const sourceLanguageId = document && (LANGUAGE_IDS.has(document.languageId) || fileExtension === '.txt')
     ? document.languageId
-    : (fileExtension === '.txt' || (context.enabledDocuments.has(uri) && !FILE_EXTENSIONS.has(fileExtension))
+    : (context.enabledDocuments.has(uri) && !FILE_EXTENSIONS.has(fileExtension)
       ? 'plaintext'
       : largeCsvLanguageId(fileExtension));
   try {
@@ -1652,10 +1663,16 @@ async function showTablePreview(context, resource) {
     if (isLargeFile) {
       const largeDocument = { uri: sourceUri, languageId: sourceLanguageId };
       const hasExplicitDelimiter = configuredDelimiter(largeDocument, context) !== 'auto';
+      const isTxtFile = fileExtension === '.txt';
+      const hasExplicitLanguageMode = document && LANGUAGE_IDS.has(document.languageId);
+      if (isTxtFile && !context.enabledDocuments.has(uri) && !hasExplicitLanguageMode) {
+        vscode.window.showWarningMessage('Select an AnyaCSV language mode or enable AnyaCSV for this .txt file first.');
+        return;
+      }
       if (!FILE_EXTENSIONS.has(fileExtension)
-        && !TEXT_EXTENSIONS.has(fileExtension)
+        && !isTxtFile
         && !context.enabledDocuments.has(uri)
-        && !(document && LANGUAGE_IDS.has(document.languageId))
+        && !hasExplicitLanguageMode
         && !hasExplicitDelimiter) {
         vscode.window.showWarningMessage('AnyaCSV could not identify this file as delimited data. Use “AnyaCSV: Enable for Current File” first.');
         return;
