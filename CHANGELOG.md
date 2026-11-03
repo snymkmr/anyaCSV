@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.7
+
+- Require an AnyaCSV language mode or explicit per-file activation for `.txt` files instead of treating the extension alone as delimited data.
+
 ## 0.2.6
 
 - Move fixed-delimiter coloring to TextMate grammars for viewport-first rendering and ten-column color cycling.
