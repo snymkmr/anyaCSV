@@ -3,7 +3,7 @@
   "displayName": "AnyaCSV",
   "icon": "assets/CSV-icon-256.png",
   "description": "Detect, preview, and lint CSV and other delimited files.",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "publisher": "Sanyam",
   "repository": {
     "type": "git",

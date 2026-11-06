@@ -1853,6 +1853,9 @@ async function showTablePreview(context, resource) {
     panel.webview.html = buildTablePreviewHtml(document, initialParsed, previewModel);
   }
   panel.reveal(vscode.ViewColumn.Beside);
+  // Webview panels open as preview (italic) tabs, which the next opened file replaces.
+  // Pin the panel so a large-file preview is not discarded and re-read.
+  if (panel.active) await vscode.commands.executeCommand('workbench.action.keepEditor');
 }
 
 async function applyDocumentDelimiter(document, delimiter, extensionContext, hostContext) {
