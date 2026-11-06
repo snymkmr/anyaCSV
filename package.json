@@ -3,7 +3,7 @@
   "displayName": "AnyaCSV",
   "icon": "assets/CSV-icon-256.png",
   "description": "Detect, preview, and lint CSV and other delimited files.",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "publisher": "Sanyam",
   "repository": {
     "type": "git",
@@ -27,7 +27,8 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "package": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && vsce package -o dist/"
   },
   "contributes": {
     "languages": [
@@ -235,5 +236,8 @@
         }
       }
     }
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^4.1.0"
   }
 }

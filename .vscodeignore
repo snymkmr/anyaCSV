@@ -4,3 +4,4 @@ test/**
 tests/**
 assets/*.svg
 assets/anycsv-icon.png
+dist/**

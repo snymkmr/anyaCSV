@@ -255,6 +255,43 @@ test('reports streamed CSV quote errors with line and column', async t => {
   });
 });
 
+test('previews large files that contain blank lines', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'anyacsv-large-blank-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'blank.csv');
+  await fs.writeFile(filePath, 'name,age\nann,30\n\nbob,40\n\n');
+  const uri = { fsPath: filePath, toString: () => `file://${filePath}` };
+  const context = { workspaceState: { get: () => undefined }, enabledDocuments: new Set() };
+
+  const model = await buildLargeCsvTablePreview(uri, context, 'csv');
+
+  assert.deepEqual(model.dataRows.map(({ row }) => row.cells.map(cell => cell.value)), [['ann', '30'], ['bob', '40']]);
+  assert.equal(model.lintIssueCount, 0);
+});
+
+test('streams large files identically to the in-memory parser across chunk boundaries', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'anyacsv-large-chunks-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'chunks.csv');
+  const text = '﻿id::note::emoji\r\n1::"multi\r\nline ""quoted"""::😀\r2::plain::é\n\n3::"a::b"::中文\r\n';
+  await fs.writeFile(filePath, text);
+  const uri = { fsPath: filePath, toString: () => `file://${filePath}` };
+  const context = { workspaceState: { get: () => undefined }, enabledDocuments: new Set() };
+  const syncFs = require('node:fs');
+  const originalCreateReadStream = syncFs.createReadStream;
+  syncFs.createReadStream = (file, options = {}) => originalCreateReadStream(file, { ...options, highWaterMark: 1 });
+  t.after(() => { syncFs.createReadStream = originalCreateReadStream; });
+
+  const model = await buildLargeCsvTablePreview(uri, context, 'csv', undefined, { delimiter: '::' });
+
+  const expected = parseDelimited(text, '::', '"').rows
+    .filter((row, index) => index > 0 && !row.blank)
+    .map(row => row.cells.map(cell => cell.value));
+  assert.deepEqual(model.headers, ['id', 'note', 'emoji']);
+  assert.deepEqual(model.dataRows.map(({ row }) => row.cells.map(cell => cell.value)), expected);
+  assert.equal(model.lintIssueCount, 0);
+});
+
 test('reuses the preview delimiter when early rows stop matching auto-detection', () => {
   const fixture = createPreviewFixture('name,value\nAlice,1\nBob,2\n');
   fixture.document.setText('edited header\nplain opening row\nthird,row,still delimited\n');

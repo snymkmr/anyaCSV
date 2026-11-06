@@ -475,7 +475,7 @@ async function buildLargeCsvTablePreview(uri, context, languageId, onProgress, o
 
   for await (const record of streamCsvRecords(filePath, delimiter, quoteCharacter, stat.size, onProgress)) {
     const parsed = record.text.length === 0
-      ? { rows: [{ start: 0, end: 0, cells: [{ start: 0, end: 0, value: '', quoted: false }], blank: true }] }
+      ? { rows: [{ start: 0, end: 0, cells: [{ start: 0, end: 0, value: '', quoted: false }], blank: true }], errors: [] }
       : parseDelimited(record.text, delimiter, quoteCharacter);
     for (const error of parsed.errors) {
       const location = csvRecordLocation(record, error.start);
